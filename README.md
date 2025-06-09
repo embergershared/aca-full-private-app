@@ -23,14 +23,13 @@ az upgrade
 az extension add --name containerapp --upgrade --allow-preview true
 az provider register --namespace Microsoft.App
 az provider register --namespace Microsoft.OperationalInsights
-
-$LOCATION="southcentralus"
 ```
 
 ## 1. Quick deployment Option - Public
 
 ```pwsh
 $RESOURCE_GROUP="rg-aca-quickstart-album-api-01"
+$LOCATION="southcentralus"
 
 $ENVIRONMENT="aca-env-quick-album-api"
 $API_NAME="aca-app-quick-album-api"
@@ -60,6 +59,7 @@ az containerapp up `
 
 ```pwsh
 $RESOURCE_GROUP="rg-aca-quickstart-album-api-02"
+$LOCATION="southcentralus"
 
 $RANDOM_SUFFIX = $(Get-Random -Minimum 100 -Maximum 999)
 
@@ -141,7 +141,8 @@ Now we deploy, adding VNet integration and private access on all the resources.
 It will lead to deploy and use a jumpbox in the VNet to complete the deployment.
 
 ```pwsh
-$RESOURCE_GROUP="rg-aca-quickstart-album-api-03"
+$RESOURCE_GROUP="rg-aca-quickstart-album-api-04"
+$LOCATION="southcentralus"
 
 $RANDOM_SUFFIX = $(Get-Random -Minimum 100 -Maximum 999)
 
@@ -157,7 +158,6 @@ $LOG_ANALYTICS_WORKSPACE="law-aca-albumapi-$($RANDOM_SUFFIX)"
 $STORAGE_ACCOUNT="stacaalbumapi$($RANDOM_SUFFIX)"
 $KV_NAME = "kv-aca-albumapi-$($RANDOM_SUFFIX)"
 
-
 $BUILD_IMAGE_NAME = "eb-apps/album-api"
 $BUILD_IMAGE_TAG = "original"
 
@@ -170,35 +170,34 @@ az group create --name $RESOURCE_GROUP --location $LOCATION
 
 # Create a Virtual Network and Subnets
 # Ref: To use a VNet with Container Apps, the VNet must have a dedicated subnet with a CIDR range of /23 or larger when using the Consumption only environemnt, or a CIDR range of /27 or larger when using the workload profiles environment (https://learn.microsoft.com/en-us/azure/container-apps/vnet-custom?tabs=bash&pivots=azure-portal#create-a-virtual-network)
-
 az network vnet create `
-  --address-prefixes 13.0.0.0/23 `
+  --address-prefixes 192.168.10.0/23 `
   --resource-group $RESOURCE_GROUP `
   --location $LOCATION `
   --name $VNET_NAME
 
 az network vnet subnet create `
-  --address-prefixes 13.0.0.0/27 `
+  --address-prefixes 192.168.10.0/27 `
   --name $WKLD_SUBNET_NAME `
   --resource-group $RESOURCE_GROUP `
   --vnet-name $VNET_NAME
 
 az network vnet subnet create `
-  --address-prefixes 13.0.0.32/27 `
+  --address-prefixes 192.168.10.32/27 `
   --delegations Microsoft.App/environments `
   --name $ACA_ENV_SUBNET_NAME `
   --resource-group $RESOURCE_GROUP `
   --vnet-name $VNET_NAME
 
 az network vnet subnet create `
-  --address-prefixes 13.0.0.64/27 `
+  --address-prefixes 192.168.10.64/27 `
   --name $PE_SUBNET_NAME `
   --resource-group $RESOURCE_GROUP `
   --vnet-name $VNET_NAME `
-  --disable-private-endpoint-network-policies
+  --private-endpoint-network-policies Disabled
 
 az network vnet subnet create `
-  --address-prefixes 13.0.0.128/27 `
+  --address-prefixes 192.168.10.128/27 `
   --name AzureBastionSubnet `
   --resource-group $RESOURCE_GROUP `
   --vnet-name $VNET_NAME
@@ -257,7 +256,7 @@ az keyvault create `
   --default-action 'Deny' `
   --public-network-access Enabled
 
-$KV_ID = $(az keyvault show --name $KV_NAME --resource-group $RG_NAME --query id -o tsv)
+$KV_ID = $(az keyvault show --name $KV_NAME --resource-group $RESOURCE_GROUP --query id -o tsv)
 
 
 # Create a Windows Jumpbox VM in the VNet with a Public IP
@@ -273,7 +272,7 @@ function GeneratePassword {
     $length = 14
   )
 
-  $symbols = '!@#$%^&*'.ToCharArray()
+  $symbols = '@#%&*'.ToCharArray()
   $characterList = 'a'..'z' + 'A'..'Z' + '0'..'9' + $symbols
   do {
     $password = -join (0..$length | ForEach-Object { $characterList | Get-Random })
@@ -282,7 +281,7 @@ function GeneratePassword {
     [int]$hasDigit = $password -match '[0-9]'
     [int]$hasSymbol = $password.IndexOfAny($symbols) -ne -1
   }
-  until (($hasLowerChar + $hasUpperChar + $hasDigit + $hasSymbol) -ge 3)
+  until (($hasLowerChar + $hasUpperChar + $hasDigit + $hasSymbol) -ge 4)
 
   return $password #| ConvertTo-SecureString -AsPlainText
 }
@@ -302,7 +301,7 @@ az keyvault secret set `
 #     --resource-group $RESOURCE_GROUP `
 #     --location $LOCATION
 
-## Create the Windows 11 VM
+## Create a Windows 11 VM
 az vm create `
     --resource-group $RESOURCE_GROUP `
     --name $JUMPBOX_NAME `
@@ -318,11 +317,51 @@ az vm create `
 # --public-ip-address $JUMPBOX_PIP_NAME `
 
 
-# Create ACR, build container image and push it to the ACR
-az acr create -n $ACR_NAME -g $RESOURCE_GROUP --sku Premium --location $LOCATION --public-network-enabled false
+####################   LOG IN TO THE JUMPBOX VM   ####################
+
+# Update Key Vault to be completely private
+# 1. Disable public network access
+az keyvault update `
+    --name $KV_NAME `
+    --resource-group $RESOURCE_GROUP `
+    --public-network-access Disabled
+
+# 2. Get the Key Vault resource ID
+$KV_ID=$(az keyvault show --name $KV_NAME --resource-group $RESOURCE_GROUP --query id -o tsv)
+
+# 3. Create a private endpoint for Key Vault
+az network private-endpoint create `
+    --name "$($KV_NAME)-pe" `
+    --resource-group $RESOURCE_GROUP `
+    --vnet-name $VNET_NAME `
+    --subnet $PE_SUBNET_NAME `
+    --private-connection-resource-id $KV_ID `
+    --group-id vault `
+    --nic-name "$($KV_NAME)-pe-nic" `
+    --connection-name "conn-kv"
+
+# 4. Create DNS records for the Key Vault private endpoint
+# Gather the data
+$KV_PE_NIC_ID=$(az network private-endpoint show --name "$($KV_NAME)-pe" --resource-group $RESOURCE_GROUP --query 'networkInterfaces[0].id' -o tsv)
+$KV_PRIVATE_IP=$(az network nic show --ids $KV_PE_NIC_ID --query "ipConfigurations[0].privateIPAddress" --output tsv)
+$KV_FQDN=$(az keyvault show --name $KV_NAME --resource-group $RESOURCE_GROUP --query properties.vaultUri -o tsv | sed 's/https:\/\///' | sed 's/\///')
+
+# Create the private DNS record
+az network private-dns record-set a create --name $KV_NAME --zone-name "privatelink.vaultcore.azure.net" --resource-group $RESOURCE_GROUP
+az network private-dns record-set a add-record --record-set-name $KV_NAME --zone-name "privatelink.vaultcore.azure.net" --resource-group $RESOURCE_GROUP --ipv4-address $KV_PRIVATE_IP
+
+
+# Create a Private ACR
+az acr create `
+    --name $ACR_NAME `
+    --resource-group $RESOURCE_GROUP `
+    --location $LOCATION `
+    --sku Premium `
+    --public-network-enabled false
+
+$ACR_ID=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query id -o tsv)
 
 # Create a Private Endpoint for the ACR
-$ACR_ID=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query id -o tsv)
 az network private-endpoint create `
     --name "$($ACR_NAME)-pe" `
     --resource-group $RESOURCE_GROUP `
@@ -342,13 +381,13 @@ $REGISTRY_FQDN=$(az network nic show --ids $PE_NIC_ID --query "ipConfigurations[
 $DATA_ENDPOINT_FQDN=$(az network nic show --ids $PE_NIC_ID --query "ipConfigurations[?privateLinkConnectionProperties.requiredMemberName=='registry_data_$LOCATION'].privateLinkConnectionProperties.fqdns" --output tsv)
 $ACR_HOST=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query loginServer -o tsv)
 
-# Create the Private DNS records
+## Create the Private DNS records
 az network private-dns record-set a create --name $ACR_NAME --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP
 az network private-dns record-set a create --name "$($ACR_NAME).$($LOCATION).data" --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP
 az network private-dns record-set a add-record --record-set-name $ACR_NAME --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP --ipv4-address $REGISTRY_PRIVATE_IP
 az network private-dns record-set a add-record --record-set-name "$($ACR_NAME).$($LOCATION).data" --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP --ipv4-address $DATA_ENDPOINT_PRIVATE_IP
 
-
+# From Private VM, Build the container image and push it to the ACR
 az acr build -t "${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" -r $ACR_NAME containerapps-albumapi-csharp/src
 
 
@@ -361,8 +400,8 @@ az storage account create `
     --kind StorageV2
 
 az monitor log-analytics workspace create `
-    --resource-group $RESOURCE_GROUP `
     --workspace-name $LOG_ANALYTICS_WORKSPACE `
+    --resource-group $RESOURCE_GROUP `
     --location $LOCATION
 
 # Get the Log Analytics Client ID and Client Secret
