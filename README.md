@@ -345,15 +345,14 @@ az vm create `
 The following commands will lock the resources and use PRivate networking and DNS resolution to access resources.
 It is required to be run on a machine (VM or Pipeline self-hosted agent) that can resolve and access the other resources in the VNet.
 
-> Important note: The VM will need the following tools:
->
+> The VM needs the following tools:
 > - Azure CLI
 > - Docker
 
 ```pwsh
 ####################   LOG IN TO THE JUMPBOX VM   ####################
 
-$RANDOM_SUFFIX = "XXXX" # Replace with the actual random suffix used in previous step.
+$RANDOM_SUFFIX = "XXX" # Replace with the actual random suffix used in previous step.
 
 $RESOURCE_GROUP="rg-aca-quickstart-album-api-04"
 $LOCATION="southcentralus"
@@ -381,8 +380,7 @@ $ENVIRONMENT="aca-env-private-album-api"
 $API_NAME="aca-app-private-album-api"
 
 
-# Update Key Vault to be completely private
-# 1. Disable public network access
+# 1. Update Key Vault to disable public network access
 az keyvault update `
     --name $KV_NAME `
     --resource-group $RESOURCE_GROUP `
@@ -408,12 +406,12 @@ $KV_PE_NIC_ID=$(az network private-endpoint show --name "$($KV_NAME)-pe" --resou
 $KV_PRIVATE_IP=$(az network nic show --ids $KV_PE_NIC_ID --query "ipConfigurations[0].privateIPAddress" --output tsv)
 $KV_FQDN="$($KV_NAME).vault.azure.net"
 
-# Create the private DNS record
+# 5. Create the private DNS record
 az network private-dns record-set a create --name $KV_NAME --zone-name "privatelink.vaultcore.azure.net" --resource-group $RESOURCE_GROUP
 az network private-dns record-set a add-record --record-set-name $KV_NAME --zone-name "privatelink.vaultcore.azure.net" --resource-group $RESOURCE_GROUP --ipv4-address $KV_PRIVATE_IP
 
 
-# Create a Private ACR
+# 6. Create a Private endpoint capable Container Registry
 az acr create `
     --name $ACR_NAME `
     --resource-group $RESOURCE_GROUP `
@@ -423,7 +421,7 @@ az acr create `
 
 $ACR_ID=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query id -o tsv)
 
-# Create a Private Endpoint for the ACR
+# 7. Create a Private Endpoint for the ACR
 az network private-endpoint create `
     --name "$($ACR_NAME)-pe" `
     --resource-group $RESOURCE_GROUP `
@@ -434,7 +432,7 @@ az network private-endpoint create `
     --nic-name "$($ACR_NAME)-pe-nic" `
     --connection-name "conn-acr"
 
-# Create DNS record for the ACR's private endpoint
+# 8. Create DNS record for the ACR's private endpoint
 ## Gather the data
 $PE_NIC_ID=$(az network private-endpoint show --name "$($ACR_NAME)-pe" --resource-group $RESOURCE_GROUP --query 'networkInterfaces[0].id' -o tsv)
 $REGISTRY_PRIVATE_IP=$(az network nic show --ids $PE_NIC_ID --query "ipConfigurations[?privateLinkConnectionProperties.requiredMemberName=='registry'].privateIPAddress" --output tsv)
@@ -449,7 +447,7 @@ az network private-dns record-set a create --name "$($ACR_NAME).$($LOCATION).dat
 az network private-dns record-set a add-record --record-set-name $ACR_NAME --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP --ipv4-address $REGISTRY_PRIVATE_IP
 az network private-dns record-set a add-record --record-set-name "$($ACR_NAME).$($LOCATION).data" --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP --ipv4-address $DATA_ENDPOINT_PRIVATE_IP
 
-# From Private VM, Build the container image and push it to the ACR
+# 9. From Private VM, Build the container image and push it to the ACR
 az acr login -n $ACR_NAME
 
 # Pull into ACR the images used to build the App
@@ -464,8 +462,8 @@ az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/aspnet:6.0' -t 'mc
 docker build -t "${ACR_NAME}.azurecr.io/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" containerapps-albumapi-csharp/src
 docker push "${ACR_NAME}.azurecr.io/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}"
 
-# Deploy the Container App Environment
-## Create a Storage Account & LAW
+# 10. Deploy the Container App Environment
+## Create a Storage Account
 az storage account create `
     --name $STORAGE_ACCOUNT `
     --resource-group $RESOURCE_GROUP `
@@ -474,7 +472,7 @@ az storage account create `
     --kind StorageV2 `
     --public-network-access Disabled
 
-# Create a Private Endpoint for Storage Account
+## Create a Private Endpoint for Storage Account
 $STORAGE_ID=$(az storage account show --name $STORAGE_ACCOUNT --resource-group $RESOURCE_GROUP --query id -o tsv)
 
 az network private-endpoint create `
@@ -494,7 +492,7 @@ $STORAGE_PRIVATE_IP=$(az network nic show --ids $STORAGE_PE_NIC_ID --query "ipCo
 az network private-dns record-set a create --name $STORAGE_ACCOUNT --zone-name "privatelink.blob.core.windows.net" --resource-group $RESOURCE_GROUP
 az network private-dns record-set a add-record --record-set-name $STORAGE_ACCOUNT --zone-name "privatelink.blob.core.windows.net" --resource-group $RESOURCE_GROUP --ipv4-address $STORAGE_PRIVATE_IP
 
-
+## Create a Log Analytics Workspace
 az monitor log-analytics workspace create `
     --workspace-name $LOG_ANALYTICS_WORKSPACE `
     --resource-group $RESOURCE_GROUP `
@@ -548,10 +546,10 @@ az network private-dns record-set a create --name "*" --zone-name "privatelink.$
 az network private-dns record-set a add-record --record-set-name "*" --zone-name "privatelink.${LOCATION}.azurecontainerapps.io" --resource-group $RESOURCE_GROUP --ipv4-address $ACA_ENV_PRIVATE_IP
 
 
-# Get the ACR login server
+# 11. Create and deploy the Container App WebAPI
+## Get the ACR login server
 $ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query loginServer -o tsv)
 
-# Create and deploy the Container App WebAPI
 az containerapp create `
     --name $API_NAME `
     --resource-group $RESOURCE_GROUP `
@@ -566,4 +564,3 @@ az containerapp create `
     --registry-identity 'system' `
     --query properties.configuration.ingress.fqdn
 ```
-
