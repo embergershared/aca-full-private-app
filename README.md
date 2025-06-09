@@ -117,6 +117,28 @@ az containerapp env workload-profile add `
     --min-nodes 1 `
     --max-nodes 3
 
+# Create a Private Endpoint for Container App Environment
+$ACA_ENV_ID=$(az containerapp env show --name $ENVIRONMENT --resource-group $RESOURCE_GROUP --query id -o tsv)
+
+az network private-endpoint create `
+    --name "$($ENVIRONMENT)-pe" `
+    --resource-group $RESOURCE_GROUP `
+    --vnet-name $VNET_NAME `
+    --subnet $PE_SUBNET_NAME `
+    --private-connection-resource-id $ACA_ENV_ID `
+    --group-id managedEnvironments `
+    --nic-name "$($ENVIRONMENT)-pe-nic" `
+    --connection-name "conn-aca-env"
+
+# Create DNS records for the Container App Environment private endpoint
+$ACA_PE_NIC_ID=$(az network private-endpoint show --name "$($ENVIRONMENT)-pe" --resource-group $RESOURCE_GROUP --query 'networkInterfaces[0].id' -o tsv)
+$ACA_ENV_PRIVATE_IP=$(az network nic show --ids $ACA_PE_NIC_ID --query "ipConfigurations[0].privateIPAddress" -o tsv)
+
+# The Container App Environment DNS record needs to be a wildcard to support all apps
+az network private-dns record-set a create --name "*" --zone-name "privatelink.azurecontainerapps.io" --resource-group $RESOURCE_GROUP
+az network private-dns record-set a add-record --record-set-name "*" --zone-name "privatelink.azurecontainerapps.io" --resource-group $RESOURCE_GROUP --ipv4-address $ACA_ENV_PRIVATE_IP
+
+
 # Get the ACR login server
 $ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query loginServer -o tsv)
 
@@ -125,9 +147,10 @@ az containerapp create `
     --name $API_NAME `
     --resource-group $RESOURCE_GROUP `
     --environment $ENVIRONMENT `
-    --image "$ACR_LOGIN_SERVER/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" `
+    --image "${ACR_LOGIN_SERVER}/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" `
+    --registry-identity system `
     --target-port 8080 `
-    --ingress external `
+    --ingress internal `
     --workload-profile-name Dedicated-D4 `
     --min-replicas 1 `
     --max-replicas 3 `
@@ -141,10 +164,10 @@ Now we deploy, adding VNet integration and private access on all the resources.
 It will lead to deploy and use a jumpbox in the VNet to complete the deployment.
 
 ```pwsh
+$RANDOM_SUFFIX = $(Get-Random -Minimum 100 -Maximum 999)
+
 $RESOURCE_GROUP="rg-aca-quickstart-album-api-04"
 $LOCATION="southcentralus"
-
-$RANDOM_SUFFIX = $(Get-Random -Minimum 100 -Maximum 999)
 
 $VNET_NAME = "vnet-aca-albumapi-$($RANDOM_SUFFIX)"
 $WKLD_SUBNET_NAME = "wkld-snet"
@@ -157,6 +180,10 @@ $ACR_NAME = "acracaalbumapi$($RANDOM_SUFFIX)"
 $LOG_ANALYTICS_WORKSPACE="law-aca-albumapi-$($RANDOM_SUFFIX)"
 $STORAGE_ACCOUNT="stacaalbumapi$($RANDOM_SUFFIX)"
 $KV_NAME = "kv-aca-albumapi-$($RANDOM_SUFFIX)"
+
+$JUMPBOX_NAME="vm-win-albumapi-$($RANDOM_SUFFIX)"
+$JUMPBOX_ADMIN_USERNAME="acaadmin"
+$JUMPBOX_ADMIN_PASSWORD_KV_SECRET_NAME="$($JUMPBOX_NAME)-admin-password"
 
 $BUILD_IMAGE_NAME = "eb-apps/album-api"
 $BUILD_IMAGE_TAG = "original"
@@ -225,7 +252,7 @@ $privateDnsZones = @(
     "privatelink.azurecr.io",                # For Azure Container Registry
     "privatelink.blob.core.windows.net",     # For Azure Storage Account
     "privatelink.monitor.azure.com",         # For Log Analytics Workspace
-    "privatelink.azurecontainerapps.io"      # For Azure Container Apps
+    "privatelink.${LOCATION}.azurecontainerapps.io"      # For Azure Container Apps
 )
 
 foreach ($zone in $privateDnsZones) {
@@ -260,10 +287,6 @@ $KV_ID = $(az keyvault show --name $KV_NAME --resource-group $RESOURCE_GROUP --q
 
 
 # Create a Windows Jumpbox VM in the VNet with a Public IP
-$JUMPBOX_NAME="vm-win-albumapi-$($RANDOM_SUFFIX)"
-$JUMPBOX_ADMIN_USERNAME="acaadmin"
-$JUMPBOX_ADMIN_PASSWORD_KV_SECRET_NAME="$($JUMPBOX_NAME)-admin-password"
-
 ## Generate admin password and store it in Key vault
 function GeneratePassword {
   param(
@@ -388,27 +411,53 @@ az network private-dns record-set a add-record --record-set-name $ACR_NAME --zon
 az network private-dns record-set a add-record --record-set-name "$($ACR_NAME).$($LOCATION).data" --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP --ipv4-address $DATA_ENDPOINT_PRIVATE_IP
 
 # From Private VM, Build the container image and push it to the ACR
-az acr build -t "${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" -r $ACR_NAME containerapps-albumapi-csharp/src
+#az acr build -t "${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" -r $ACR_NAME containerapps-albumapi-csharp/src
+docker build -t "${ACR_NAME}.azurecr.io/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" containerapps-albumapi-csharp/src
+az acr login -n $ACR_NAME
+docker push "${ACR_NAME}.azurecr.io/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}"
 
-
-# Create a Storage Account, LAW and an Container App Environment
+# Deploy the Container App Environment
+## Create a Storage Account & LAW
 az storage account create `
     --name $STORAGE_ACCOUNT `
     --resource-group $RESOURCE_GROUP `
     --location $LOCATION `
     --sku Standard_LRS `
-    --kind StorageV2
+    --kind StorageV2 `
+    --public-network-access Disabled
+
+# Create a Private Endpoint for Storage Account
+$STORAGE_ID=$(az storage account show --name $STORAGE_ACCOUNT --resource-group $RESOURCE_GROUP --query id -o tsv)
+
+az network private-endpoint create `
+    --name "$($STORAGE_ACCOUNT)-pe" `
+    --resource-group $RESOURCE_GROUP `
+    --vnet-name $VNET_NAME `
+    --subnet $PE_SUBNET_NAME `
+    --private-connection-resource-id $STORAGE_ID `
+    --group-id blob `
+    --nic-name "$($STORAGE_ACCOUNT)-pe-nic" `
+    --connection-name "conn-storage"
+
+# Create DNS records for the Storage Account private endpoint
+$STORAGE_PE_NIC_ID=$(az network private-endpoint show --name "$($STORAGE_ACCOUNT)-pe" --resource-group $RESOURCE_GROUP --query 'networkInterfaces[0].id' -o tsv)
+$STORAGE_PRIVATE_IP=$(az network nic show --ids $STORAGE_PE_NIC_ID --query "ipConfigurations[0].privateIPAddress" -o tsv)
+
+az network private-dns record-set a create --name $STORAGE_ACCOUNT --zone-name "privatelink.blob.core.windows.net" --resource-group $RESOURCE_GROUP
+az network private-dns record-set a add-record --record-set-name $STORAGE_ACCOUNT --zone-name "privatelink.blob.core.windows.net" --resource-group $RESOURCE_GROUP --ipv4-address $STORAGE_PRIVATE_IP
+
 
 az monitor log-analytics workspace create `
     --workspace-name $LOG_ANALYTICS_WORKSPACE `
     --resource-group $RESOURCE_GROUP `
     --location $LOCATION
 
-# Get the Log Analytics Client ID and Client Secret
+## Get the Log Analytics Client ID and Client Secret + App Environment ID
 $LOG_ANALYTICS_WORKSPACE_CLIENT_ID=az monitor log-analytics workspace show --resource-group $RESOURCE_GROUP --workspace-name $LOG_ANALYTICS_WORKSPACE --query customerId -o tsv
 $LOG_ANALYTICS_WORKSPACE_CLIENT_SECRET=az monitor log-analytics workspace get-shared-keys --resource-group $RESOURCE_GROUP --workspace-name $LOG_ANALYTICS_WORKSPACE --query primarySharedKey -o tsv
+$ACA_ENV_SUBNET_ID = $(az network vnet subnet show --resource-group $RESOURCE_GROUP --vnet-name $VNET_NAME --name $ACA_ENV_SUBNET_NAME --query id -o tsv)
 
-# Create the Container App Environment
+## Create the Container App Environment
 az containerapp env create `
     --name $ENVIRONMENT `
     --resource-group $RESOURCE_GROUP `
@@ -417,6 +466,7 @@ az containerapp env create `
     --logs-workspace-key $LOG_ANALYTICS_WORKSPACE_CLIENT_SECRET `
     --enable-workload-profiles true `
     --internal-only true `
+    --infrastructure-subnet-resource-id $ACA_ENV_SUBNET_ID `
     --storage-account $STORAGE_ACCOUNT
 
 # Add the Dedicated D4 workload profile to the environment (required for VNet integration)
@@ -427,6 +477,28 @@ az containerapp env workload-profile add `
     --workload-profile-type D4 `
     --min-nodes 1 `
     --max-nodes 3
+
+# Create a Private Endpoint for Container App Environment
+$ACA_ENV_ID=$(az containerapp env show --name $ENVIRONMENT --resource-group $RESOURCE_GROUP --query id -o tsv)
+
+az network private-endpoint create `
+    --name "$($ENVIRONMENT)-pe" `
+    --resource-group $RESOURCE_GROUP `
+    --vnet-name $VNET_NAME `
+    --subnet $PE_SUBNET_NAME `
+    --private-connection-resource-id $ACA_ENV_ID `
+    --group-id environment `
+    --nic-name "$($ENVIRONMENT)-pe-nic" `
+    --connection-name "conn-aca-env"
+
+# Create DNS records for the Container App Environment private endpoint
+$ACA_PE_NIC_ID=$(az network private-endpoint show --name "$($ENVIRONMENT)-pe" --resource-group $RESOURCE_GROUP --query 'networkInterfaces[0].id' -o tsv)
+$ACA_ENV_PRIVATE_IP=$(az network nic show --ids $ACA_PE_NIC_ID --query "ipConfigurations[0].privateIPAddress" -o tsv)
+
+# The Container App Environment DNS record needs to be a wildcard to support all apps
+az network private-dns record-set a create --name "*" --zone-name "privatelink.${LOCATION}.azurecontainerapps.io" --resource-group $RESOURCE_GROUP
+az network private-dns record-set a add-record --record-set-name "*" --zone-name "privatelink.${LOCATION}.azurecontainerapps.io" --resource-group $RESOURCE_GROUP --ipv4-address $ACA_ENV_PRIVATE_IP
+
 
 # Get the ACR login server
 $ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query loginServer -o tsv)
