@@ -411,9 +411,17 @@ az network private-dns record-set a add-record --record-set-name $ACR_NAME --zon
 az network private-dns record-set a add-record --record-set-name "$($ACR_NAME).$($LOCATION).data" --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP --ipv4-address $DATA_ENDPOINT_PRIVATE_IP
 
 # From Private VM, Build the container image and push it to the ACR
-#az acr build -t "${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" -r $ACR_NAME containerapps-albumapi-csharp/src
-docker build -t "${ACR_NAME}.azurecr.io/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" containerapps-albumapi-csharp/src
 az acr login -n $ACR_NAME
+
+az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/sdk:6.0' -t 'mcr/dotnet/sdk:6.0'
+az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/aspnet:6.0' -t 'mcr/dotnet/aspnet:6.0'
+
+# Update Dockerfile with ACR name
+(Get-Content -Path "containerapps-albumapi-csharp\src\Dockerfile") -replace '<acr_name>', $ACR_NAME | Set-Content -Path "containerapps-albumapi-csharp\src\Dockerfile"
+
+# Build & Push to ACR the App image, using dotnet images from the ACR
+$BUILD_IMAGE_TAG="emm-02"
+docker build -t "${ACR_NAME}.azurecr.io/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" containerapps-albumapi-csharp/src
 docker push "${ACR_NAME}.azurecr.io/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}"
 
 # Deploy the Container App Environment
@@ -515,6 +523,7 @@ az containerapp create `
     --min-replicas 1 `
     --max-replicas 3 `
     --registry-server $ACR_LOGIN_SERVER `
+    --registry-identity 'system' `
     --query properties.configuration.ingress.fqdn
-
+```
 
