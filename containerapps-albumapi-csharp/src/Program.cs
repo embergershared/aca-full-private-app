@@ -43,6 +43,7 @@ record Album(int Id, string Title, string Artist, double Price, string Image_url
      public static List<Album> GetAll(){
          var albums = new List<Album>(){
             // new Album(0, "Emmanuel test", "On Sunday", 111, "https://www.microsoft.com"),
+            // new Album(62, "Emmanuel test 2", "On Monday evening", 2222, "https://www.microsoft.com"),
 
             new Album(1, "You, Me and an App Id", "Daprize", 10.99, "https://aka.ms/albums-daprlogo"),
             new Album(2, "Seven Revision Army", "The Blue-Green Stripes", 13.99, "https://aka.ms/albums-containerappslogo"),
