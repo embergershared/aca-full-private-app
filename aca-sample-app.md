@@ -37,14 +37,14 @@ az containerapp up `
 
 ## Controlled Full deployment Option - Public
 
-### az containerapp up does:
+### `az containerapp up` does:
 - Create the resource group
 - Create an Azure Container Registry
 - Build the container image and push it to the registry
 - Create the Container Apps environment with a Log Analytics workspace
 - Create and deploy the container app using the built container image
 
-## So we do these manually, Public access first:
+## So we do these manually, in another Resource Group:
 
 ```pwsh
 $RESOURCE_GROUP="rg-aca-quickstart-album-api-02"
@@ -54,7 +54,7 @@ $ACR_NAME = "acracaqsalbapi$($RANDOM_SUFFIX)"
 $LOG_ANALYTICS_WORKSPACE="law-aca-albumapi-$($RANDOM_SUFFIX)"
 $STORAGE_ACCOUNT="stacaalbumapi$($RANDOM_SUFFIX)"
 $BUILD_IMAGE_NAME = "eb-apps/album-api"
-$BUILD_IMAGE_TAG = "emm"
+$BUILD_IMAGE_TAG = "original"
 
 $ENVIRONMENT="aca-env-manual-album-api"
 $API_NAME="aca-app-manual-album-api"
