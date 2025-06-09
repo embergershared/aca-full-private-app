@@ -344,7 +344,7 @@ az network private-endpoint create `
 # Gather the data
 $KV_PE_NIC_ID=$(az network private-endpoint show --name "$($KV_NAME)-pe" --resource-group $RESOURCE_GROUP --query 'networkInterfaces[0].id' -o tsv)
 $KV_PRIVATE_IP=$(az network nic show --ids $KV_PE_NIC_ID --query "ipConfigurations[0].privateIPAddress" --output tsv)
-$KV_FQDN=$(az keyvault show --name $KV_NAME --resource-group $RESOURCE_GROUP --query properties.vaultUri -o tsv | sed 's/https:\/\///' | sed 's/\///')
+$KV_FQDN="$($KV_NAME).vault.azure.net"
 
 # Create the private DNS record
 az network private-dns record-set a create --name $KV_NAME --zone-name "privatelink.vaultcore.azure.net" --resource-group $RESOURCE_GROUP
