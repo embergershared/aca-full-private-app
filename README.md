@@ -220,7 +220,7 @@ az network bastion create `
   --sku Basic
 
 
-# Create and link the required Private DNS Zones
+# Create and link the required Private DNS Zones on the VNet
 $privateDnsZones = @(
     "privatelink.vaultcore.azure.net",       # For Key Vault
     "privatelink.azurecr.io",                # For Azure Container Registry
@@ -242,6 +242,8 @@ foreach ($zone in $privateDnsZones) {
         --registration-enabled false
 }
 
+
+# Create an Azure Key Vault to store the VM Password
 $MY_PUBLIC_IP = $((Invoke-WebRequest ifconfig.me/ip).Content.Trim())
 az keyvault create `
   --name $KV_NAME `
@@ -261,7 +263,38 @@ $KV_ID = $(az keyvault show --name $KV_NAME --resource-group $RG_NAME --query id
 # Create a Windows Jumpbox VM in the VNet with a Public IP
 $JUMPBOX_NAME="vm-win-albumapi-$($RANDOM_SUFFIX)"
 $JUMPBOX_ADMIN_USERNAME="acaadmin"
-$JUMPBOX_ADMIN_PASSWORD="P@ssw0rd123!" # Use a strong password
+$JUMPBOX_ADMIN_PASSWORD_KV_SECRET_NAME="$($JUMPBOX_NAME)-admin-password"
+
+## Generate admin password and store it in Key vault
+function GeneratePassword {
+  param(
+    [ValidateRange(12, 256)]
+    [int] 
+    $length = 14
+  )
+
+  $symbols = '!@#$%^&*'.ToCharArray()
+  $characterList = 'a'..'z' + 'A'..'Z' + '0'..'9' + $symbols
+  do {
+    $password = -join (0..$length | ForEach-Object { $characterList | Get-Random })
+    [int]$hasLowerChar = $password -cmatch '[a-z]'
+    [int]$hasUpperChar = $password -cmatch '[A-Z]'
+    [int]$hasDigit = $password -match '[0-9]'
+    [int]$hasSymbol = $password.IndexOfAny($symbols) -ne -1
+  }
+  until (($hasLowerChar + $hasUpperChar + $hasDigit + $hasSymbol) -ge 3)
+
+  return $password #| ConvertTo-SecureString -AsPlainText
+}
+
+$JUMPBOX_ADMIN_PASSWORD = GeneratePassword 18
+az keyvault secret set `
+  --vault-name $KV_NAME `
+  --name $JUMPBOX_ADMIN_PASSWORD_KV_SECRET_NAME `
+  --value $JUMPBOX_ADMIN_PASSWORD
+
+
+## (Optional) Create a Public IP to access the VM
 # $JUMPBOX_PIP_NAME="$($JUMPBOX_NAME)-pip"
 
 # az network public-ip create `
@@ -269,6 +302,7 @@ $JUMPBOX_ADMIN_PASSWORD="P@ssw0rd123!" # Use a strong password
 #     --resource-group $RESOURCE_GROUP `
 #     --location $LOCATION
 
+## Create the Windows 11 VM
 az vm create `
     --resource-group $RESOURCE_GROUP `
     --name $JUMPBOX_NAME `
