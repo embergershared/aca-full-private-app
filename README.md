@@ -338,9 +338,48 @@ az vm create `
     --subnet $WKLD_SUBNET_NAME `
     --nsg-rule NONE
 # --public-ip-address $JUMPBOX_PIP_NAME `
+```
 
+### Log in to the Jumpbox VM through Azure Bastion
 
+The following commands will lock the resources and use PRivate networking and DNS resolution to access resources.
+It is required to be run on a machine (VM or Pipeline self-hosted agent) that can resolve and access the other resources in the VNet.
+
+> Important note: The VM will need the following tools:
+>
+> - Azure CLI
+> - Docker
+
+```pwsh
 ####################   LOG IN TO THE JUMPBOX VM   ####################
+
+$RANDOM_SUFFIX = "XXXX" # Replace with the actual random suffix used in previous step.
+
+$RESOURCE_GROUP="rg-aca-quickstart-album-api-04"
+$LOCATION="southcentralus"
+
+$VNET_NAME = "vnet-aca-albumapi-$($RANDOM_SUFFIX)"
+$WKLD_SUBNET_NAME = "wkld-snet"
+$ACA_ENV_SUBNET_NAME = "aca-env-snet"
+$PE_SUBNET_NAME = "pe-snet"
+$BASTION_NAME = "bastion-aca-albumapi-$($RANDOM_SUFFIX)"
+$BASTION_PIP_NAME = "$($BASTION_NAME)-pip"
+
+$ACR_NAME = "acracaalbumapi$($RANDOM_SUFFIX)"
+$LOG_ANALYTICS_WORKSPACE="law-aca-albumapi-$($RANDOM_SUFFIX)"
+$STORAGE_ACCOUNT="stacaalbumapi$($RANDOM_SUFFIX)"
+$KV_NAME = "kv-aca-albumapi-$($RANDOM_SUFFIX)"
+
+$JUMPBOX_NAME="vm-win-albumapi-$($RANDOM_SUFFIX)"
+$JUMPBOX_ADMIN_USERNAME="acaadmin"
+$JUMPBOX_ADMIN_PASSWORD_KV_SECRET_NAME="$($JUMPBOX_NAME)-admin-password"
+
+$BUILD_IMAGE_NAME = "eb-apps/album-api"
+$BUILD_IMAGE_TAG = "original"
+
+$ENVIRONMENT="aca-env-private-album-api"
+$API_NAME="aca-app-private-album-api"
+
 
 # Update Key Vault to be completely private
 # 1. Disable public network access
