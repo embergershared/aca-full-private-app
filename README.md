@@ -417,9 +417,11 @@ In the Jumpbox VM, open a PowerShell terminal and execute the following commands
 
 ```pwsh
 ####################   LOG IN TO THE JUMPBOX VM with Tools  ####################
-az login
-
 $RANDOM_SUFFIX = "XXX" # Replace with the actual random suffix used in previous step.
+
+az login
+# Enter credentials
+# Select the subscription to use
 
 $RESOURCE_GROUP="rg-aca-quickstart-album-api-04"
 $LOCATION="southcentralus"
