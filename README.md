@@ -408,6 +408,7 @@ wsl --install
 mkdir C:\data && cd C:\data
 git clone https://github.com/embergershared/aca-full-private-app.git
 cd aca-full-private-app
+vscode .
 ```
 
 #### Lock existing resources and Deploy the Container App privately
