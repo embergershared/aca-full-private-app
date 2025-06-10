@@ -337,6 +337,8 @@ az vm create `
 
 #### Login to the Jumpbox VM
 
+##### Using Azure Bastion in Browser RDP client
+
 - In the Azure Portal, use `Connect via Bastion` to login the Jumpbox VM
 
 - Select:
@@ -351,9 +353,17 @@ az vm create `
 
   - Click `Connect`
 
-  - Follow the Startup wizard (Next, Accept)
+#### Using Azure Bastion with Remote Desktop Tunneling
+
+```pwsh
+$JUMPBOX_ID=$(az vm show --name $JUMPBOX_NAME --resource-group $RESOURCE_GROUP --query 'id' -o tsv)
+
+az network bastion rdp --name $BASTION_NAME --resource-group $RESOURCE_GROUP --target-resource-id  $JUMPBOX_ID
+```
 
 #### Install the required tools on the Jumpbox VM
+
+- Follow the Startup wizard (Next, Accept)
 
 - Launch a PowerShell terminal **as Administrator**
 
