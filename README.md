@@ -603,7 +603,7 @@ az network private-endpoint create `
     --vnet-name $VNET_NAME `
     --subnet $PE_SUBNET_NAME `
     --private-connection-resource-id $ACA_ENV_ID `
-    --group-id managedEnvironment `
+    --group-id managedEnvironments `
     --nic-name "$($ENVIRONMENT)-pe-nic" `
     --connection-name "conn-aca-env"
 
