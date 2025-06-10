@@ -316,14 +316,6 @@ az keyvault secret set `
   --value $JUMPBOX_ADMIN_PASSWORD
 
 
-## (Optional) Create a Public IP to access the VM
-# $JUMPBOX_PIP_NAME="$($JUMPBOX_NAME)-pip"
-
-# az network public-ip create `
-#     --name $JUMPBOX_PIP_NAME `
-#     --resource-group $RESOURCE_GROUP `
-#     --location $LOCATION
-
 ## Create a Windows 11 VM
 az vm create `
     --resource-group $RESOURCE_GROUP `
@@ -337,20 +329,94 @@ az vm create `
     --vnet-name $VNET_NAME `
     --subnet $WKLD_SUBNET_NAME `
     --nsg-rule NONE
-# --public-ip-address $JUMPBOX_PIP_NAME `
 ```
 
-### Log in to the Jumpbox VM through Azure Bastion
+### Use the Jumpbox VM
 
-The following commands will lock the resources and use PRivate networking and DNS resolution to access resources.
-It is required to be run on a machine (VM or Pipeline self-hosted agent) that can resolve and access the other resources in the VNet.
+#### Login to the Jumpbox VM
 
-> The VM needs the following tools:
-> - Azure CLI
-> - Docker
+- In the Azure Portal, use `Connect via Bastion` to login the Jumpbox VM
+
+- Select:
+  
+  - Authentication Type: `Password from Azure Key Vault`
+  
+  - Enter the user name (default is `acaadmin` from the script)
+  
+  - Select the Key Vault
+  
+  - Select the Kay Vault Secret
+
+  - Click `Connect`
+
+  - Follow the Startup wizard (Next, Accept)
+
+##### Install the required tools on the Jumpbox VM
+
+- Launch a PowerShell terminal **as Administrator**
+
+- Execute these commands to get the elements and tools required (there are many ways to achieve the same result here)
 
 ```pwsh
-####################   LOG IN TO THE JUMPBOX VM   ####################
+# 1. Install Chocolatey
+Set-ExecutionPolicy Bypass -Scope Process -Force
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+
+# 2. Chocolatey functions
+Function Install-ChocoPackage {
+    param (
+        [Parameter(Mandatory = $true)]
+        [Object]$Packages
+    )
+
+    foreach ($package in $Packages) {
+        $command = "choco install $package -y"
+        Write-Host
+        Write-Host "Install-ChocoPackage => Executing: $command"
+        Invoke-Expression $command
+    }
+}
+
+# 3. Install packages
+$base_core = @(
+    "azure-cli",
+    "docker-desktop",
+    "cascadiacode",
+    "cascadiamono",
+    "firefox",
+    "git",
+    "jq",
+    "nerd-fonts-cascadiacode",
+    "nerd-fonts-firacode",
+    "nerd-fonts-firamono",
+    "nerd-fonts-jetbrainsmono",
+    "notepadplusplus",
+    "powershell-core",
+    "vscode"
+)
+Install-ChocoPackage -Packages $base_core
+
+# 4. Set your git user and email
+git config --global user.name "Emmanuel"
+git config --global user.email "emberger@microsoft.com"
+
+# 5. Install WSL to enable Docker Desktop WSL integration
+wsl --set-default-version 2
+wsl --install -d Ubuntu-22.04
+
+# 6. Reboot and Finish Docker Desktop installation (mainly `Skip`)
+
+# 7. Clone this repository
+git clone https://github.com/embergershared/aca-full-private-app.git
+```
+
+#### Lock existing resources and Deploy the Container App privately
+
+In the Jumpbox VM, open a PowerShell terminal and execute the following commands to deploy the Container App privately.
+
+```pwsh
+####################   LOG IN TO THE JUMPBOX VM with Tools  ####################
 
 $RANDOM_SUFFIX = "XXX" # Replace with the actual random suffix used in previous step.
 
