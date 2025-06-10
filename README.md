@@ -351,11 +351,11 @@ az vm create `
 
   - Follow the Startup wizard (Next, Accept)
 
-##### Install the required tools on the Jumpbox VM
+#### Install the required tools on the Jumpbox VM
 
 - Launch a PowerShell terminal **as Administrator**
 
-- Execute these commands to get the elements and tools required (there are many ways to achieve the same result here)
+- Execute these commands to get the elements and tools required (there are many ways to achieve the same result and some of the tools are personal preferences)
 
 ```pwsh
 # 1. Install Chocolatey
@@ -397,18 +397,17 @@ $base_core = @(
 )
 Install-ChocoPackage -Packages $base_core
 
-# 4. Set your git user and email
-git config --global user.name "Emmanuel"
-git config --global user.email "emberger@microsoft.com"
+# 4. Install WSL to enable Docker Desktop WSL integration
+wsl --install
 
-# 5. Install WSL to enable Docker Desktop WSL integration
-wsl --set-default-version 2
-wsl --install -d Ubuntu-22.04
+# 5. Reboot
 
-# 6. Reboot and Finish Docker Desktop installation (mainly `Skip`)
+# 6. Finish Docker Desktop installation (`Accept`, `Skip`, Check the 'Engine starts`)
 
 # 7. Clone this repository
+mkdir C:\data && cd C:\data
 git clone https://github.com/embergershared/aca-full-private-app.git
+cd aca-full-private-app
 ```
 
 #### Lock existing resources and Deploy the Container App privately
@@ -417,6 +416,7 @@ In the Jumpbox VM, open a PowerShell terminal and execute the following commands
 
 ```pwsh
 ####################   LOG IN TO THE JUMPBOX VM with Tools  ####################
+az login
 
 $RANDOM_SUFFIX = "XXX" # Replace with the actual random suffix used in previous step.
 
