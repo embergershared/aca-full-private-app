@@ -417,6 +417,7 @@ In the Jumpbox VM, open a PowerShell terminal and execute the following commands
 
 ```pwsh
 ####################   LOG IN TO THE JUMPBOX VM with Tools  ####################
+cd C:\data\aca-full-private-app
 $RANDOM_SUFFIX = "XXX" # Replace with the actual random suffix used in previous step.
 
 az login
@@ -602,7 +603,7 @@ az network private-endpoint create `
     --vnet-name $VNET_NAME `
     --subnet $PE_SUBNET_NAME `
     --private-connection-resource-id $ACA_ENV_ID `
-    --group-id environment `
+    --group-id managedEnvironment `
     --nic-name "$($ENVIRONMENT)-pe-nic" `
     --connection-name "conn-aca-env"
 
