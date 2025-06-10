@@ -243,7 +243,9 @@ az network bastion create `
   --location $LOCATION `
   --public-ip-address $BASTION_PIP_NAME `
   --vnet-name $VNET_NAME `
-  --sku Basic
+  --sku Standard `
+  --file-copy true `
+  --enable-tunneling true
 
 
 # Create and link the required Private DNS Zones on the VNet
