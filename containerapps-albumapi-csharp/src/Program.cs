@@ -1,47 +1,90 @@
-var builder = WebApplication.CreateBuilder();
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
-// Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
 
-builder.Services.AddCors(options => {
-    options.AddDefaultPolicy(builder =>
+namespace key_vault_console_app
+{
+    class Program
     {
-        builder.AllowAnyOrigin();
-        builder.AllowAnyHeader();
-        builder.AllowAnyMethod();
-    });
-});
+        static async Task Main(string[] args)
+        {
 
-var app = builder.Build();
+            var builder = WebApplication.CreateBuilder();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+            // Add services to the container.
+            // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+            builder.Services.AddEndpointsApiExplorer();
+            builder.Services.AddSwaggerGen();
 
-app.UseCors();
+            builder.Services.AddCors(options => {
+                options.AddDefaultPolicy(builder =>
+                {
+                    builder.AllowAnyOrigin();
+                    builder.AllowAnyHeader();
+                    builder.AllowAnyMethod();
+                });
+            });
 
-app.MapGet("/", async context =>
-{
-    await context.Response.WriteAsync("Hit the /albums endpoint to retrieve a list of albums!");
-});
+            var app = builder.Build();
 
-app.MapGet("/albums", () =>
-{
-    return Album.GetAll();
-})
-.WithName("GetAlbums");
+            // Configure the HTTP request pipeline.
+            if (app.Environment.IsDevelopment())
+            {
+                app.UseSwagger();
+                app.UseSwaggerUI();
+            }
 
-app.Run();
+            app.UseCors();
 
-record Album(int Id, string Title, string Artist, double Price, string Image_url)
-{
-     public static List<Album> GetAll(){
-         var albums = new List<Album>(){
+            app.MapGet("/", async context =>
+            {
+                await context.Response.WriteAsync("Hit the /albums endpoint to retrieve a list of albums!");
+            });
+
+            app.MapGet("/albums", () =>
+            {
+                return Album.GetAll();
+            })
+            .WithName("GetAlbums");
+
+            app.MapGet("/secrets", async () =>
+            {
+                var KeyVaultUrl = app.Configuration.GetValue<string>("KEY_VAULT_URL")
+                    ?? throw new InvalidOperationException("KEY_VAULT_URL environment variable is not set");
+                
+                var AzureKeyVaultClient = new SecretClient(
+                    new Uri(KeyVaultUrl),
+                    new DefaultAzureCredential()
+                );
+
+                // Requires the VM (or other platform Managed Identity - like the Container App Managed Identity) to get the assigned RBAC role "Key Vault Reader" on the target key vault.
+                var allSecrets = AzureKeyVaultClient.GetPropertiesOfSecretsAsync() ?? throw new InvalidOperationException("No secrets found in the Key Vault.");
+
+                var secretsList = new List<string>();
+                await foreach (SecretProperties secretProperties in allSecrets)
+                {
+                    secretsList.Add(secretProperties.Name);
+                }
+
+                return secretsList;
+            })
+            .WithName("GetSecrets");
+
+            await app.RunAsync();
+        }
+
+        record Album(int Id, string Title, string Artist, double Price, string Image_url)
+        {
+            public static List<Album> GetAll() {
+                var albums = new List<Album>(){
             // new Album(0, "Emmanuel test", "On Sunday", 111, "https://www.microsoft.com"),
             // new Album(62, "Emmanuel test 2", "On Monday evening", 2222, "https://www.microsoft.com"),
 
@@ -53,6 +96,8 @@ record Album(int Id, string Title, string Artist, double Price, string Image_url
             new Album(6, "Sweet Container O' Mine", "Guns N Probeses", 14.99, "https://aka.ms/albums-containerappslogo")
          };
 
-        return albums; 
-     }
+                return albums;
+            }
+        }
+    }
 }
