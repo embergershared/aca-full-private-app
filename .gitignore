@@ -426,5 +426,4 @@ FodyWeavers.xsd
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,visualstudio,dotnetcore
 containerapps-albumapi-csharp/src/Dockerfile
-containerapps-albumapi-csharp/src/Dockerfile
 containerapps-albumapi-csharp/src/appsettings.Development.json
