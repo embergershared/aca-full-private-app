@@ -55,18 +55,20 @@ namespace key_vault_console_app
             })
             .WithName("GetAlbums");
 
-            app.MapGet("/secrets", async () =>
+            _ = app.MapGet("/secrets", async () =>
             {
                 var KeyVaultUrl = app.Configuration.GetValue<string>("KEY_VAULT_URL")
                     ?? throw new InvalidOperationException("KEY_VAULT_URL environment variable is not set");
-                
+
                 var AzureKeyVaultClient = new SecretClient(
                     new Uri(KeyVaultUrl),
                     new DefaultAzureCredential()
                 );
 
-                // Requires the VM (or other platform Managed Identity - like the Container App Managed Identity) to get the assigned RBAC role "Key Vault Reader" on the target key vault.
-                var allSecrets = AzureKeyVaultClient.GetPropertiesOfSecretsAsync() ?? throw new InvalidOperationException("No secrets found in the Key Vault.");
+                // Requires the VM (or other platform Managed Identity - like the Container App Managed Identity),
+                // to get the assigned RBAC role "Key Vault Reader" on the target key vault.
+                var allSecrets = AzureKeyVaultClient.GetPropertiesOfSecretsAsync()
+                    ?? throw new InvalidOperationException("No secrets found in the Key Vault.");
 
                 var secretsList = new List<string>();
                 await foreach (SecretProperties secretProperties in allSecrets)
