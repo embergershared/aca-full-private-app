@@ -405,7 +405,8 @@ $base_core = @(
     "nerd-fonts-jetbrainsmono",
     "notepadplusplus",
     "powershell-core",
-    "vscode"
+    "vscode",
+    "openshift-cli"
 )
 Install-ChocoPackage -Packages $base_core
 
