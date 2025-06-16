@@ -10,7 +10,7 @@ pool:
   name: ado-self-hosted
 
 steps:
-- script: nslookup 4 kv-aca-albumapi-384.vault.azure.net
+- script: nslookup kv-aca-albumapi-384.vault.azure.net
   name: nslookup_kv
   displayName: 'nslookup the private Key vault'
 
