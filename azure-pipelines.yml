@@ -10,10 +10,14 @@ pool:
   name: ado-self-hosted
 
 steps:
-- script: ping -c 4 kv-aca-albumapi-384.vault.azure.net
-  displayName: 'Ping the private Key vault'
+- displayName: 'nslookup the private Key vault'
+  script: nslookup 4 kv-aca-albumapi-384.vault.azure.net
 
-- script: |
+- displayName: 'curl the private Key vault'
+  script: curl https://kv-aca-albumapi-384.vault.azure.net/
+
+- displayName: 'Run a multi-line script'
+  script: |
     echo Add other tasks to build, test, and deploy your project.
     echo See https://aka.ms/yaml
-  displayName: 'Run a multi-line script'
+  
