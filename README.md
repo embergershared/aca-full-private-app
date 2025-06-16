@@ -646,4 +646,20 @@ az containerapp create `
     --registry-server $ACR_LOGIN_SERVER `
     --registry-identity 'system' `
     --query properties.configuration.ingress.fqdn
+
+
+# 12. Create and deploy an API Management instance (Standard v2)
+
+$APIM_NAME = "apim-aca-albumapi-$($RANDOM_SUFFIX)"
+az apim create `
+  --name $APIM_NAME `
+  --resource-group $RESOURCE_GROUP `
+  --publisher-name Emm `
+  --publisher-email admin@contoso.com `
+  --enable-managed-identity true `
+  --public-network-access false `
+  --sku-name StandardV2 `
+  --virtual-network Internal
+
 ```
+
