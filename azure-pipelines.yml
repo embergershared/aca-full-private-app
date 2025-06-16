@@ -10,7 +10,7 @@ pool:
   name: ado-self-hosted
 
 steps:
-- script: ping kv-aca-albumapi-384.vault.azure.net
+- script: ping -c 4 kv-aca-albumapi-384.vault.azure.net
   displayName: 'Ping the private Key vault'
 
 - script: |
