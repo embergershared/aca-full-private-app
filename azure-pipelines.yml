@@ -7,7 +7,7 @@ trigger:
 - main
 
 pool:
-  vmImage: ubuntu-latest
+  name: ado-self-hosted
 
 steps:
 - script: echo Hello, world!
