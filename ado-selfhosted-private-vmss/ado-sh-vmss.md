@@ -63,7 +63,7 @@ az vmss extension set `
   --name CustomScript `
   --version 2.0 `
   --publisher Microsoft.Azure.Extensions `
-  --settings '{ \"fileUris\":[\"https://github.com/embergershared/aca-full-private-app/ado-selfhosted-private-vmss/post-install.sh"], \"commandToExecute\": \"bash ./post-install.sh\" }'
+  --settings '{ \"fileUris\":[\"https://github.com/embergershared/aca-full-private-app/ado-selfhosted-private-vmss/post-install.sh\"], \"commandToExecute\": \"bash ./post-install.sh\" }'
 
 
 
