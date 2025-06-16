@@ -34,11 +34,10 @@ $STORAGE_ACCOUNT="stacaalbumapi$($RANDOM_SUFFIX)"
 # $API_NAME="aca-app-private-album-api"
 
 $ADO_VMSS_NAME = "vmss-lin-ado-aca-albumapi-$($RANDOM_SUFFIX)"
-
-
 $WKLD_SUBNET_ID = $(az network vnet subnet show --resource-group $RESOURCE_GROUP --vnet-name $VNET_NAME --name $WKLD_SUBNET_NAME --query id -o tsv)
 
-# Ref: https://learn.microsoft.com/en-us/cli/azure/vmss?view=azure-cli-latest#az-vmss-create
+# Create a VMSS for Azure DevOps self-hosted agents
+## Ref: https://learn.microsoft.com/en-us/cli/azure/vmss?view=azure-cli-latest#az-vmss-create
 az vmss create `
   --name $ADO_VMSS_NAME `
   --resource-group $RESOURCE_GROUP `
@@ -57,8 +56,26 @@ az vmss create `
   --subnet $WKLD_SUBNET_ID
 
 
+# Add Azure DevOps self-hosted agent extension to the VMSS
+az vmss extension set `
+  --vmss-name $ADO_VMSS_NAME `
+  --resource-group $RESOURCE_GROUP `
+  --name CustomScript `
+  --version 2.0 `
+  --publisher Microsoft.Azure.Extensions `
+  --settings '{ \"fileUris\":[\"https://github.com/embergershared/aca-full-private-app/ado-selfhosted-private-vmss/post-install.sh"], \"commandToExecute\": \"bash ./post-install.sh\" }'
+
+
+
+
 ```
+
+
+
+
 
 ## References
 
 - [Azure DevOps Self-hosted agents on Azure VMSS](https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/vmss?view=azure-devops)
+- [Azure DevOps Self-hosted agents outbound requirements](https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/linux-agent?view=azure-devops&tabs=IP-V4#im-running-a-firewall-and-my-code-is-in-azure-repos-what-urls-does-the-agent-need-to-communicate-with)
+- [Azure DevOps Self-hosted VMSS agent customization script](https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/scale-set-agents?view=azure-devops#customizing-virtual-machine-startup-via-the-custom-script-extension)
