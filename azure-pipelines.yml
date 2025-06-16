@@ -9,18 +9,10 @@ trigger:
 pool:
   name: ado-self-hosted
 
-steps:
-- script: nslookup kv-aca-albumapi-384.vault.azure.net
-  name: nslookup_kv
-  displayName: 'nslookup the private Key vault'
-
-- script: curl https://kv-aca-albumapi-384.vault.azure.net/
-  name: curl_kv
-  displayName: 'curl the private Key vault'
-
 - script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
-  name: multi_lines
-  displayName: 'Run a multi-line script'
-  
+    echo NSLOOKUP Key vault
+    nslookup kv-aca-albumapi-384.vault.azure.net
+    echo CURL Key vault
+    curl https://kv-aca-albumapi-384.vault.azure.net/
+  name: check_priv_kv
+  displayName: 'Private Key vault check'  
