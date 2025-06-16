@@ -10,17 +10,17 @@ pool:
   name: ado-self-hosted
 
 steps:
-- name: nslookup_kv
+- script: nslookup 4 kv-aca-albumapi-384.vault.azure.net
+  name: nslookup_kv
   displayName: 'nslookup the private Key vault'
-  script: nslookup 4 kv-aca-albumapi-384.vault.azure.net
 
-- name: curl_kv
+- script: curl https://kv-aca-albumapi-384.vault.azure.net/
+  name: curl_kv
   displayName: 'curl the private Key vault'
-  script: curl https://kv-aca-albumapi-384.vault.azure.net/
 
-- name: multi_lines
-  displayName: 'Run a multi-line script'
-  script: |
+- script: |
     echo Add other tasks to build, test, and deploy your project.
     echo See https://aka.ms/yaml
+  name: multi_lines
+  displayName: 'Run a multi-line script'
   
