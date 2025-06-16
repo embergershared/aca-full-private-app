@@ -10,8 +10,8 @@ pool:
   name: ado-self-hosted
 
 steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
+- script: ping kv-aca-albumapi-384.vault.azure.net
+  displayName: 'Ping the private Key vault'
 
 - script: |
     echo Add other tasks to build, test, and deploy your project.
