@@ -24,8 +24,13 @@ $STORAGE_ACCOUNT="stacaalbumapi$($RANDOM_SUFFIX)"
 # $KV_NAME = "kv-aca-albumapi-$($RANDOM_SUFFIX)"
 
 # $JUMPBOX_NAME="vm-win-albumapi-$($RANDOM_SUFFIX)"
+# $JUMPBOX_ID=$(az vm show --name $JUMPBOX_NAME --resource-group $RESOURCE_GROUP --query 'id' -o tsv)
+# $BASTION_NAME = "bastion-aca-albumapi-$($RANDOM_SUFFIX)"
+# az network bastion rdp --name $BASTION_NAME --resource-group $RESOURCE_GROUP --target-resource-id  $JUMPBOX_ID
+
 # $JUMPBOX_ADMIN_USERNAME="acaadmin"
 # $JUMPBOX_ADMIN_PASSWORD_KV_SECRET_NAME="$($JUMPBOX_NAME)-admin-password"
+
 
 # $BUILD_IMAGE_NAME = "eb-apps/album-api"
 # $BUILD_IMAGE_TAG = "original"
@@ -63,10 +68,7 @@ az vmss extension set `
   --name CustomScript `
   --version 2.0 `
   --publisher Microsoft.Azure.Extensions `
-  --settings '{ 
-    "fileUris": ["https://raw.githubusercontent.com/embergershared/aca-full-private-app/main/ado-selfhosted-private-vmss/post-install.sh"], 
-    "commandToExecute": "bash ./post-install.sh" 
-  }'
+  --settings '{ \"fileUris\": [\"https://raw.githubusercontent.com/embergershared/aca-full-private-app/main/ado-selfhosted-private-vmss/post-install.sh\"], \"commandToExecute\": \"bash ./post-install.sh\" }'
 
 
 
