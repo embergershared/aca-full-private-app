@@ -69,9 +69,6 @@ az vmss extension set `
   --version 2.0 `
   --publisher Microsoft.Azure.Extensions `
   --settings '{ \"fileUris\": [\"https://raw.githubusercontent.com/embergershared/aca-full-private-app/main/ado-selfhosted-private-vmss/post-install.sh\"], \"commandToExecute\": \"bash ./post-install.sh\" }'
-
-
-
 ```
 
 
