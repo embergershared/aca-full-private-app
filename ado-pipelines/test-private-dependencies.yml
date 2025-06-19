@@ -21,3 +21,10 @@ steps:
     echo 'CURL Key vault'
     curl https://kv-aca-albumapi-384.vault.azure.net/
   displayName: 'Private Key vault check'
+
+- script: |
+    echo 'NSLOOKUP ACR'
+    nslookup acracaalbumapi384.azurecr.io
+    echo 'CURL ACR'
+    curl https://acracaalbumapi384.azurecr.io/
+  displayName: 'Private Container Registry check'
