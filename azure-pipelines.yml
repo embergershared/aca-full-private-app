@@ -9,6 +9,12 @@ resources:
 - repo: self
 
 variables:
+
+pool:
+  name: ado-self-hosted
+
+variables:
+- group: Album_Api_Build
   # Container registry service connection established during pipeline creation
   dockerRegistryServiceConnection: '8c7c8275-e8e0-44a0-b4e8-8ccdbe92a577'
   imageRepository: 'ebappsalbumapi'
@@ -27,6 +33,7 @@ stages:
     displayName: Build
     pool:
       vmImage: $(vmImageName)
+      name: $(PRIVATE_AGENT_POOL_NAME)ado-self-hosted
     steps:
     - task: Docker@2
       displayName: Build and push an image to container registry
