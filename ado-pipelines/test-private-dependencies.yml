@@ -6,6 +6,9 @@
 trigger:
 - main
 
+variables:
+- group: Album_Api_Build
+
 pool:
   name: ado-self-hosted
 
@@ -24,7 +27,7 @@ steps:
 
 - script: |
     echo 'NSLOOKUP ACR'
-    nslookup acracaalbumapi384.azurecr.io
+    nslookup $(ACR_NAME).azurecr.io
     echo 'CURL ACR'
-    curl https://acracaalbumapi384.azurecr.io/
+    curl https://$(ACR_NAME).azurecr.io/
   displayName: 'Private Container Registry check'
