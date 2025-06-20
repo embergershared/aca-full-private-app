@@ -1,6 +1,6 @@
 #!/bin/bash
 az cli --version
-touch /2025-06-20-custom-script-is-here.txt
+touch /2025-06-20-custom-extension-script-start.txt
 
 # Install Docker for Ubuntu with convenient script
 # Add Docker's official GPG key:
@@ -19,3 +19,9 @@ sudo apt-get update
 
 # Install Docker Engine, CLI, containerd, Buildx, and Compose:
 sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Test Docker installation
+sudo docker run hello-world
+
+# Log end of script
+touch /2025-06-20-custom-extension-script-end.txt
