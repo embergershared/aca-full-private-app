@@ -9,21 +9,18 @@ resources:
 - repo: self
 
 variables:
-
-pool:
-  name: ado-self-hosted
-
-variables:
 - group: Album_Api_Build
   # Container registry service connection established during pipeline creation
-  dockerRegistryServiceConnection: '8c7c8275-e8e0-44a0-b4e8-8ccdbe92a577'
-  imageRepository: 'ebappsalbumapi'
-  containerRegistry: 'acracaalbumapi384.azurecr.io'
-  dockerfilePath: '$(Build.SourcesDirectory)/containerapps-albumapi-csharp/src/Dockerfile'
-  tag: '$(Build.BuildId)'
-
-  # Agent VM image name
-  vmImageName: 'ubuntu-latest'
+- name: dockerRegistryServiceConnection
+  value: '8c7c8275-e8e0-44a0-b4e8-8ccdbe92a577'
+- name: imageRepository
+  value: 'ebappsalbumapi'
+- name: containerRegistry
+  value: '$(ACR_NAME).azurecr.io'
+- name: dockerfilePath
+  value: '$(Build.SourcesDirectory)/containerapps-albumapi-csharp/src/Dockerfile'
+- name: tag
+  value: '$(Build.BuildId)'
 
 stages:
 - stage: Build
@@ -32,8 +29,7 @@ stages:
   - job: Build
     displayName: Build
     pool:
-      vmImage: $(vmImageName)
-      name: $(PRIVATE_AGENT_POOL_NAME)ado-self-hosted
+      name: $(PRIVATE_AGENT_POOL_NAME)
     steps:
     - task: Docker@2
       displayName: Build and push an image to container registry
