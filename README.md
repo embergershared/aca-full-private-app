@@ -73,6 +73,9 @@ $ENVIRONMENT="aca-env-manual-album-api"
 $API_NAME="aca-app-manual-album-api"
 
 # Create Resource Group
+if (-not $LOCATION) {
+    $LOCATION = Read-Host "Enter your Azure region (e.g., eastus, westeurope)"
+}
 az group create --name $RESOURCE_GROUP --location $LOCATION
 
 # Create ACR, build container image and push it to the ACR
@@ -164,10 +167,36 @@ Now we deploy, adding VNet integration and private access on all the resources.
 It will lead to deploy and use a jumpbox in the VNet to complete the deployment.
 
 ```pwsh
+
+#----FUNCTIONS----
+## Generate admin password and store it in Key vault
+function GeneratePassword {
+    param(
+        [ValidateRange(12, 256)]
+        [int]$length = 14
+    )
+
+     $symbols = '@-_*()^$#!{}[]|\~'.ToCharArray()
+    $characterList = @(97..122 + 65..90 + 48..57 | ForEach-Object { [char]$_ }) + $symbols
+
+    do {
+        $password = -join (1..$length | ForEach-Object { $characterList | Get-Random })
+        $hasLowerChar = $password -cmatch '[a-z]'
+        $hasUpperChar = $password -cmatch '[A-Z]'
+        $hasDigit     = $password -match '[0-9]'
+        $hasSymbol    = $password.IndexOfAny($symbols) -ne -1
+    }
+    until ($hasLowerChar -and $hasUpperChar -and $hasDigit -and $hasSymbol)
+
+    return $password
+}
+#--END FUNCTIONS----
+
+#----BEGIN VARIABLES----
 $RANDOM_SUFFIX = $(Get-Random -Minimum 100 -Maximum 999)
 
-$RESOURCE_GROUP="rg-aca-quickstart-album-api-04"
-$LOCATION="southcentralus"
+$RESOURCE_GROUP="rg-aca-quickstart-album-api-$($RANDOM_SUFFIX)"
+$LOCATION="eastus2"
 
 $VNET_NAME = "vnet-aca-albumapi-$($RANDOM_SUFFIX)"
 $WKLD_SUBNET_NAME = "wkld-snet"
@@ -183,20 +212,51 @@ $KV_NAME = "kv-aca-albumapi-$($RANDOM_SUFFIX)"
 
 $JUMPBOX_NAME="vm-win-albumapi-$($RANDOM_SUFFIX)"
 $JUMPBOX_ADMIN_USERNAME="acaadmin"
+$JUMPBOX_ADMIN_USERNAME_KV_SECRET_NAME = "$($JUMPBOX_NAME)-admin-username"
 $JUMPBOX_ADMIN_PASSWORD_KV_SECRET_NAME="$($JUMPBOX_NAME)-admin-password"
 
+# VM and image creation variables
+$BUILD_AGENT_VM_NAME = "vm-ubuntu-ado-agent-$($RANDOM_SUFFIX)"
+$BUILD_AGENT_VM_ADMIN_USERNAME = "adoagentadmin"
+$BUILD_AGENT_VM_ADMIN_PASSWORD = GeneratePassword 18
+$BUILD_AGENT_ADMIN_USERNAME_KV_SECRET_NAME = "$($BUILD_AGENT_VM_NAME)-admin-username"
+$BUILD_AGENT_ADMIN_PASSWORD_KV_SECRET_NAME="$($BUILD_AGENT_VM_NAME)-admin-password"
+$BUILD_AGENT_MANAGED_IMAGE_NAME = "mi-ubuntu-ado-agent"
+$BUILD_AGENT_IMAGE_VERSION_NAME = "1.0.0"
+
+# Container App build variables
 $BUILD_IMAGE_NAME = "eb-apps/album-api"
 $BUILD_IMAGE_TAG = "original"
 
 $ENVIRONMENT="aca-env-private-album-api"
 $API_NAME="aca-app-private-album-api"
 
-# Create Resource Group
-az group create --name $RESOURCE_GROUP --location $LOCATION
+#----END VARIABLES----
 
+# Create Resource Group
+if (-not $LOCATION) {
+    $LOCATION = Read-Host "Enter your Azure region (e.g., eastus, westeurope)"
+}
+
+#Login to Azure
+az login
+# Select the subscription to use
+az account set --subscription "Your Subscription Name or ID"
+
+# Create the Resource Group
+if (az group exists --name $RESOURCE_GROUP) {
+    Write-Host "Resource Group $RESOURCE_GROUP already exists. Skipping creation."
+} else {
+    Write-Host "Creating Resource Group $RESOURCE_GROUP in $LOCATION..."
+}
+az group create --name $RESOURCE_GROUP --location $LOCATION
 
 # Create a Virtual Network and Subnets
 # Ref: To use a VNet with Container Apps, the VNet must have a dedicated subnet with a CIDR range of /23 or larger when using the Consumption only environemnt, or a CIDR range of /27 or larger when using the workload profiles environment (https://learn.microsoft.com/en-us/azure/container-apps/vnet-custom?tabs=bash&pivots=azure-portal#create-a-virtual-network)
+if (az network vnet exists --name $VNET_NAME --resource-group $RESOURCE_GROUP) {
+    Write-Host "Virtual Network $VNET_NAME already exists in $RESOURCE_GROUP. Skipping creation."
+} else {
+    Write-Host "Creating Virtual Network $VNET_NAME in $RESOURCE_GROUP..."
 az network vnet create `
   --address-prefixes 192.168.10.0/23 `
   --resource-group $RESOURCE_GROUP `
@@ -228,15 +288,26 @@ az network vnet subnet create `
   --name AzureBastionSubnet `
   --resource-group $RESOURCE_GROUP `
   --vnet-name $VNET_NAME
+}
 
-
-# Create Azure Bastion
+# Create Azure Bastion PIP
+if (az network public-ip exists --name $BASTION_PIP_NAME --resource-group $RESOURCE_GROUP) {
+    Write-Host "Public IP $BASTION_PIP_NAME already exists in $RESOURCE_GROUP. Skipping creation."
+} else {
+    Write-Host "Creating Public IP $BASTION_PIP_NAME in $RESOURCE_GROUP..."
+}
 az network public-ip create `
   --name $BASTION_PIP_NAME `
   --resource-group $RESOURCE_GROUP `
   --location $LOCATION `
   --sku Standard
 
+# Create Azure Bastion Host
+if (az network bastion exists --name $BASTION_NAME --resource-group $RESOURCE_GROUP) {
+    Write-Host "Bastion Host $BASTION_NAME already exists in $RESOURCE_GROUP. Skipping creation."
+} else {
+    Write-Host "Creating Bastion Host $BASTION_NAME in $RESOURCE_GROUP..."
+}
 az network bastion create `
   --name $BASTION_NAME `
   --resource-group $RESOURCE_GROUP `
@@ -247,21 +318,68 @@ az network bastion create `
   --file-copy true `
   --enable-tunneling true
 
-
 # Create and link the required Private DNS Zones on the VNet
-$privateDnsZones = @(
-    "privatelink.vaultcore.azure.net",       # For Key Vault
-    "privatelink.azurecr.io",                # For Azure Container Registry
-    "privatelink.blob.core.windows.net",     # For Azure Storage Account
-    "privatelink.monitor.azure.com",         # For Log Analytics Workspace
-    "privatelink.${LOCATION}.azurecontainerapps.io"      # For Azure Container Apps
+
+# Define global (non-region-specific) private DNS zones
+$globalZones = @(
+    "privatelink.blob.core.windows.net",
+    "privatelink.file.core.windows.net",
+    "privatelink.queue.core.windows.net",
+    "privatelink.table.core.windows.net",
+    "privatelink.vaultcore.azure.net",
+    "privatelink.azurecr.io",
+    "privatelink.database.windows.net",
+    "privatelink.documents.azure.com",
+    "privatelink.mongo.cosmos.azure.com",
+    "privatelink.gremlin.cosmos.azure.com",
+    "privatelink.cassandra.cosmos.azure.com",
+    "privatelink.table.cosmos.azure.com",
+    "privatelink.redis.cache.windows.net",
+    "privatelink.postgres.database.azure.com",
+    "privatelink.mysql.database.azure.com",
+    "privatelink.mariadb.database.azure.com",
+    "privatelink.azuresynapse.net",
+    "privatelink.dev.azuresynapse.net",
+    "privatelink.web.core.windows.net",
+    "privatelink.monitor.azure.com",
+    "privatelink.oms.opinsights.azure.com",
+    "privatelink.agentsvc.azure-automation.net",
+    "privatelink.azure-api.net",
+    "privatelink.servicebus.windows.net",
+    "privatelink.eventgrid.azure.net",
+    "privatelink.eventhub.windows.net",
+    "privatelink.azurewebsites.net",
+    "privatelink.batch.azure.com",
+    "privatelink.search.windows.net",
+    "privatelink.siterecovery.windowsazure.com",
+    "privatelink.azurearcdata.com"
 )
 
+# Define region-specific zones
+$regionSpecificZones = @(
+    "privatelink.$location.azurecontainerapps.io",
+    "privatelink.$location.azmk8s.io",
+    "privatelink.$location.applicationinsights.azure.com",
+    "privatelink.$location.datafactory.azure.net"
+)
+
+# Combine all zones
+$privateDnsZones = $globalZones + $regionSpecificZones
+
 foreach ($zone in $privateDnsZones) {
+    #Check to see if the Private DNS Zone already exists
+    if (az network private-dns zone exists --name $zone --resource-group $RESOURCE_GROUP) {
+        Write-Host "Private DNS Zone $zone already exists in $RESOURCE_GROUP. Skipping creation."
+        continue
+    }
     az network private-dns zone create `
         --resource-group $RESOURCE_GROUP `
         --name $zone
-    
+    #check if the VNet link already exists
+    if (az network private-dns link vnet exists --zone-name $zone --resource-group $RESOURCE_GROUP --name "vnet-link") {
+        Write-Host "Private DNS Zone link for $zone already exists in $RESOURCE_GROUP. Skipping creation."
+        continue
+    }
     az network private-dns link vnet create `
         --resource-group $RESOURCE_GROUP `
         --zone-name $zone `
@@ -270,9 +388,16 @@ foreach ($zone in $privateDnsZones) {
         --registration-enabled false
 }
 
-
 # Create an Azure Key Vault to store the VM Password
 $MY_PUBLIC_IP = $((Invoke-WebRequest ifconfig.me/ip).Content.Trim())
+# Get the public IP address of the machine running this script
+Write-Host "My Public IP: $MY_PUBLIC_IP"
+# Get the current user ID to assign Key Vault permissions
+$CURRENT_USER_ID = az ad signed-in-user show --query userPrincipalName -o tsv
+Write-Host "Current User ID: $CURRENT_USER_ID"
+
+# Create the Key Vault
+Write-Host "Creating Key Vault $KV_NAME in $RESOURCE_GROUP..."
 az keyvault create `
   --name $KV_NAME `
   --resource-group $RESOURCE_GROUP `
@@ -286,39 +411,185 @@ az keyvault create `
   --public-network-access Enabled
 
 $KV_ID = $(az keyvault show --name $KV_NAME --resource-group $RESOURCE_GROUP --query id -o tsv)
+Write-Host "Key Vault $KV_NAME created. Id is $KV_ID"
 
+# Assign the Key Vault Administrator role to the current user
+Write-Host "Assigning Key Vault Administrator role to $CURRENT_USER_ID for Key Vault $KV_NAME..."
+az role assignment create `
+--assignee $CURRENT_USER_ID `
+--role "Key Vault Administrator" `
+--scope $KV_ID
 
-# Create a Windows Jumpbox VM in the VNet with a Public IP
-## Generate admin password and store it in Key vault
-function GeneratePassword {
-  param(
-    [ValidateRange(12, 256)]
-    [int] 
-    $length = 14
-  )
+#Create an Image Gallery to store the Dev Build VM images
+$GALLERY_NAME = "galleryacaalbumapi$($RANDOM_SUFFIX)"
 
-  $symbols = '@#%&*'.ToCharArray()
-  $characterList = 'a'..'z' + 'A'..'Z' + '0'..'9' + $symbols
-  do {
-    $password = -join (0..$length | ForEach-Object { $characterList | Get-Random })
-    [int]$hasLowerChar = $password -cmatch '[a-z]'
-    [int]$hasUpperChar = $password -cmatch '[A-Z]'
-    [int]$hasDigit = $password -match '[0-9]'
-    [int]$hasSymbol = $password.IndexOfAny($symbols) -ne -1
-  }
-  until (($hasLowerChar + $hasUpperChar + $hasDigit + $hasSymbol) -ge 4)
+# Check if the gallery exists
+$galleryExists = $false
+try {
+    $galleryInfo = az sig gallery show --name $GALLERY_NAME --resource-group $RESOURCE_GROUP --query "name" -o tsv 2>$null
+    if ($galleryInfo -eq $GALLERY_NAME) {
+        $galleryExists = $true
+    }
+} catch {}
 
-  return $password #| ConvertTo-SecureString -AsPlainText
+if ($galleryExists) {
+    Write-Host "Shared Image Gallery $GALLERY_NAME already exists in $RESOURCE_GROUP. Skipping creation."
+} else {
+    Write-Host "Creating Shared Image Gallery $GALLERY_NAME in $RESOURCE_GROUP..."
+    az sig create `
+        --resource-group $RESOURCE_GROUP `
+        --gallery-name $GALLERY_NAME `
+        --location $LOCATION
 }
 
-$JUMPBOX_ADMIN_PASSWORD = GeneratePassword 18
+# Create a Shared Image Gallery Image Definition for the Ubuntu VM
+$IMAGE_DEFINITION_NAME = "ubuntuimgdefacaalbumapi$($RANDOM_SUFFIX)"
+
+# Check if the image definition exists
+$imageDefinitionExists = $false
+try {
+    $imageDefinitionInfo = az sig image-definition show --gallery-name $GALLERY_NAME --gallery-image-definition $IMAGE_DEFINITION_NAME --resource-group $RESOURCE_GROUP --query "name" -o tsv 2>$null
+    if ($imageDefinitionInfo -eq $IMAGE_DEFINITION_NAME) {
+        $imageDefinitionExists = $true
+    }
+} catch {}
+
+if ($imageDefinitionExists) {
+    Write-Host "Shared Image Gallery Image Definition $IMAGE_DEFINITION_NAME already exists in $RESOURCE_GROUP. Skipping creation."
+} else {
+    Write-Host "Creating Shared Image Gallery Image Definition $IMAGE_DEFINITION_NAME in $RESOURCE_GROUP..."
+    az sig image-definition create `
+        --gallery-name $GALLERY_NAME `
+        --gallery-image-definition $IMAGE_DEFINITION_NAME `
+        --resource-group $RESOURCE_GROUP `
+        --os-type Linux `
+        --publisher "EmbergerShared" `
+        --offer "Ubuntu-Dev" `
+        --sku "Ubuntu-Dev-SKU"
+}
+
+# Create a Shared Image Gallery Image Version for the Ubuntu VM
+
+# Create a temporary VM to serve as the basis for our image
+Write-Host "Creating temporary VM $BUILD_AGENT_VM_NAME to prepare as Azure DevOps agent..."
+
+# Save VM credentials to Key Vault
 az keyvault secret set `
-  --vault-name $KV_NAME `
-  --name $JUMPBOX_ADMIN_PASSWORD_KV_SECRET_NAME `
-  --value $JUMPBOX_ADMIN_PASSWORD
+    --vault-name $KV_NAME `
+    --name $BUILD_AGENT_ADMIN_USERNAME_KV_SECRET_NAME `
+    --value $BUILD_AGENT_VM_ADMIN_USERNAME
 
+az keyvault secret set `
+    --vault-name $KV_NAME `
+    --name $BUILD_AGENT_ADMIN_PASSWORD_KV_SECRET_NAME `
+    --value $BUILD_AGENT_VM_ADMIN_PASSWORD
 
-## Create a Windows 11 VM
+# Create the VM with Standard security type (not TrustedLaunch)
+Write-Host "Creating temporary VM $BUILD_AGENT_VM_NAME in $RESOURCE_GROUP..."
+az vm create `
+    --resource-group $RESOURCE_GROUP `
+    --name $BUILD_AGENT_VM_NAME `
+    --image "Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest" `
+    --admin-username "$BUILD_AGENT_VM_ADMIN_USERNAME" `
+    --admin-password "$BUILD_AGENT_VM_ADMIN_PASSWORD" `
+    --vnet-name $VNET_NAME `
+    --subnet $WKLD_SUBNET_NAME `
+    --size "Standard_D4s_v3" `
+    --public-ip-address '""' `
+    --nsg-rule NONE `
+    --enable-secure-boot false `
+    --enable-vtpm false
+
+# Create the installation script content as a PowerShell variable
+$installScript = @'
+#!/bin/bash
+# Update and install basic tools
+apt-get update
+apt-get upgrade -y
+apt-get install -y curl git jq build-essential unzip zip nodejs npm
+
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sh get-docker.sh
+usermod -aG docker adoagentadmin
+
+# Install Azure CLI
+curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+
+# Install PowerShell
+curl -sSL https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -o packages-microsoft-prod.deb
+dpkg -i packages-microsoft-prod.deb
+apt-get update
+apt-get install -y powershell
+
+# Install .NET SDK
+apt-get install -y apt-transport-https
+apt-get update
+apt-get install -y dotnet-sdk-8.0
+
+# Create directory for Azure DevOps agent
+mkdir -p /home/adoagentadmin/ado-agent
+chown -R adoagentadmin:adoagentadmin /home/adoagentadmin/ado-agent
+
+# Note: The actual ADO agent setup will be done when deploying a VM from this image
+'@
+
+# Create a temporary file for the script
+$tempFile = New-TemporaryFile
+$installScript | Out-File -FilePath $tempFile.FullName -Encoding ascii
+
+# Install Azure DevOps agent prerequisites
+Write-Host "Installing Azure DevOps agent prerequisites on $BUILD_AGENT_VM_NAME..."
+az vm run-command invoke `
+    --resource-group $RESOURCE_GROUP `
+    --name $BUILD_AGENT_VM_NAME `
+    --command-id RunShellScript `
+    --scripts "@$($tempFile.FullName)"
+
+# Remove the temporary file
+Remove-Item -Path $tempFile.FullName
+
+# Allow the VM to settle
+Write-Host "Waiting for installations to complete..."
+Start-Sleep -Seconds 60
+
+# Generalize (Sysprep) the VM - this makes it suitable for creating an image
+Write-Host "Generalizing VM $BUILD_AGENT_VM_NAME..."
+az vm deallocate --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME
+az vm generalize --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME
+
+# Create a managed image from the VM
+Write-Host "Creating managed image $BUILD_AGENT_MANAGED_IMAGE_NAME from VM $BUILD_AGENT_VM_NAME..."
+az image create `
+    --resource-group $RESOURCE_GROUP `
+    --name $BUILD_AGENT_MANAGED_IMAGE_NAME `
+    --source $BUILD_AGENT_VM_NAME
+
+# Get the managed image ID
+$MANAGED_IMAGE_ID = $(az image show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_MANAGED_IMAGE_NAME --query id -o tsv)
+
+# Create an image version in the Shared Image Gallery
+Write-Host "Creating image version $BUILD_AGENT_IMAGE_VERSION_NAME in gallery $GALLERY_NAME..."
+az sig image-version create `
+    --resource-group $RESOURCE_GROUP `
+    --gallery-name $GALLERY_NAME `
+    --gallery-image-definition $IMAGE_DEFINITION_NAME `
+    --gallery-image-version $BUILD_AGENT_IMAGE_VERSION_NAME `
+    --managed-image $MANAGED_IMAGE_ID `
+    --target-regions $LOCATION `
+    --replica-count 1
+
+# Optional: Delete the temporary VM to save costs
+Write-Host "Cleaning up temporary resources..."
+az vm delete --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --yes
+
+---
+
+# Create a Windows Jumpbox VM in the VNet
+# Generate the password for the Developer VM
+$JUMPBOX_ADMIN_PASSWORD = GeneratePassword 18
+
+## Create a Windows 11 VM to be the jumpbox. This will mimic the local dev machine.
 az vm create `
     --resource-group $RESOURCE_GROUP `
     --name $JUMPBOX_NAME `
@@ -331,6 +602,21 @@ az vm create `
     --vnet-name $VNET_NAME `
     --subnet $WKLD_SUBNET_NAME `
     --nsg-rule NONE
+
+Write-Host "Jumpbox VM $JUMPBOX_NAME created in $RESOURCE_GROUP with username $JUMPBOX_ADMIN_USERNAME."
+
+# Store the id and password KeyVault
+az keyvault secret set `
+  --vault-name $KV_NAME `
+  --name $JUMPBOX_ADMIN_USERNAME_KV_SECRET_NAME `
+  --value $JUMPBOX_ADMIN_USERNAME
+
+az keyvault secret set `
+  --vault-name $KV_NAME `
+  --name $JUMPBOX_ADMIN_PASSWORD_KV_SECRET_NAME `
+  --value $JUMPBOX_ADMIN_PASSWORD
+
+Write-Host "Jumpbox VM credentials stored in Key Vault $KV_NAME."
 ```
 
 ### Use the Jumpbox VM
