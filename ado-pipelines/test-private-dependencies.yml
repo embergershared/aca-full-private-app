@@ -14,11 +14,6 @@ pool:
 
 steps:
 - script: |
-    echo 'Checking root content'
-    ls /
-  displayName: 'Check Custom script executed'
-
-- script: |
     echo 'NSLOOKUP Key vault'
     nslookup kv-aca-albumapi-384.vault.azure.net
     echo 'CURL Key vault'
