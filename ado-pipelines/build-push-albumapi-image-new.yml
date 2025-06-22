@@ -66,10 +66,19 @@ stages:
     #     containerRegistry: $(dockerRegistryServiceConnection)
     #     tags: |
     #       $(tag)
-    - task: Bash@3
-      displayName: Docker Build and Push to ACR
+    # - task: Bash@3
+    #   displayName: Docker Build and Push to ACR
+    #   inputs:
+    #     targetType: 'inline'
+    #     script: |
+    #         docker build -t "$(containerRegistry)/$(imageRepository):$(tag)" containerapps-albumapi-csharp/src
+    #         docker push "$(containerRegistry)/$(imageRepository):$(tag)"
+    - task: AzureCLI@2
       inputs:
-        targetType: 'inline'
-        script: |
-            docker build -t "$(containerRegistry)/$(imageRepository):$(tag)" containerapps-albumapi-csharp/src
-            docker push "$(containerRegistry)/$(imageRepository):$(tag)"
+        azureSubscription: 'ME-MngEnvMCAP391575-emberger-4(b8e2cc57-9620-431e-9293-4318e720ba07)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+            docker build -t "$(containerRegistry)/$(imageRepository):$(Build.BuildId)" containerapps-albumapi-csharp/src
+            az acr login
+            docker push "$(containerRegistry)/$(imageRepository):$(Build.BuildId)"
