@@ -29,7 +29,7 @@ $STORAGE_ACCOUNT="stacaalbumapi$($RANDOM_SUFFIX)"
 # az network bastion rdp --name $BASTION_NAME --resource-group $RESOURCE_GROUP --target-resource-id  $JUMPBOX_ID
 
 # $JUMPBOX_ADMIN_USERNAME="acaadmin"
-# $JUMPBOX_ADMIN_PASSWORD_KV_SECRET_NAME="$($JUMPBOX_NAME)-admin-password"
+# $ADO_VMSS_ADMIN_PASSWORD_KV_SECRET_NAME="$($JUMPBOX_NAME)-admin-password"
 
 
 # $BUILD_IMAGE_NAME = "eb-apps/album-api"
@@ -38,20 +38,66 @@ $STORAGE_ACCOUNT="stacaalbumapi$($RANDOM_SUFFIX)"
 # $ENVIRONMENT="aca-env-private-album-api"
 # $API_NAME="aca-app-private-album-api"
 
-$ADO_VMSS_NAME = "vmss-lin-ado-aca-albumapi-$($RANDOM_SUFFIX)"
+$RANDOM_SUFFIX = "384"
+$RESOURCE_GROUP="rg-aca-quickstart-album-api-04"
+$VNET_NAME = "vnet-aca-albumapi-$($RANDOM_SUFFIX)"
+$WKLD_SUBNET_NAME = "wkld-snet"
+
+$ADO_VMSS_NAME = "vmss-ubu22-ado-aca-albumapi-$($RANDOM_SUFFIX)"
+$ADO_VMSS_ADMIN_PASSWORD_KV_SECRET_NAME="$($ADO_VMSS_NAME)-admin-password"
+$ADO_VMSS_ADMIN_NAME = "adoadmin"
+
 $WKLD_SUBNET_ID = $(az network vnet subnet show --resource-group $RESOURCE_GROUP --vnet-name $VNET_NAME --name $WKLD_SUBNET_NAME --query id -o tsv)
+
+$KV_NAME = "kv-aca-albumapi-$($RANDOM_SUFFIX)"
+$KV_ID = $(az keyvault show --name $KV_NAME --resource-group $RESOURCE_GROUP --query id -o tsv)
+
+
+# Create a Windows Jumpbox VM in the VNet with a Public IP
+## Generate admin password and store it in Key vault
+function GeneratePassword {
+  param(
+    [ValidateRange(12, 256)]
+    [int] 
+    $length = 14
+  )
+
+  $symbols = '@#%&*'.ToCharArray()
+  $characterList = 'a'..'z' + 'A'..'Z' + '0'..'9' + $symbols
+  do {
+    $password = -join (0..$length | ForEach-Object { $characterList | Get-Random })
+    [int]$hasLowerChar = $password -cmatch '[a-z]'
+    [int]$hasUpperChar = $password -cmatch '[A-Z]'
+    [int]$hasDigit = $password -match '[0-9]'
+    [int]$hasSymbol = $password.IndexOfAny($symbols) -ne -1
+  }
+  until (($hasLowerChar + $hasUpperChar + $hasDigit + $hasSymbol) -ge 4)
+
+  return $password #| ConvertTo-SecureString -AsPlainText
+}
+
+$ADO_VMSS_ADMIN_PASSWORD = GeneratePassword 18
+
+az keyvault secret set `
+  --vault-name $KV_NAME `
+  --name $ADO_VMSS_ADMIN_PASSWORD_KV_SECRET_NAME `
+  --value $ADO_VMSS_ADMIN_PASSWORD
+
 
 # Create a VMSS for Azure DevOps self-hosted agents
 ## Ref: https://learn.microsoft.com/en-us/cli/azure/vmss?view=azure-cli-latest#az-vmss-create
+# https://learn.microsoft.com/en-us/azure/virtual-machines/linux/using-cloud-init
 az vmss create `
   --name $ADO_VMSS_NAME `
   --resource-group $RESOURCE_GROUP `
   --image Ubuntu2204 `
   --vm-sku Standard_D8s_v6 `
+  --admin-username $ADO_VMSS_ADMIN_NAME `
+  --admin-password $ADO_VMSS_ADMIN_PASSWORD `
   --storage-sku StandardSSD_LRS `
-  --authentication-type SSH `
-  --generate-ssh-keys `
-  --instance-count 2 `
+  --authentication-type password `
+  --instance-count 1 `
+  --custom-data cloud-init_ado.yaml `
   --disable-overprovision `
   --upgrade-policy-mode manual `
   --single-placement-group false `
@@ -60,20 +106,15 @@ az vmss create `
   --orchestration-mode Uniform `
   --subnet $WKLD_SUBNET_ID
 
-
 # Add Azure DevOps self-hosted agent extension to the VMSS
-az vmss extension set `
-  --vmss-name $ADO_VMSS_NAME `
-  --resource-group $RESOURCE_GROUP `
-  --name CustomScript `
-  --version 2.0 `
-  --publisher Microsoft.Azure.Extensions `
-  --settings '{ \"fileUris\": [\"https://raw.githubusercontent.com/embergershared/aca-full-private-app/main/ado-selfhosted-private-vmss/post-install.sh\"], \"commandToExecute\": \"bash ./post-install.sh\" }'
+# az vmss extension set `
+#   --vmss-name $ADO_VMSS_NAME `
+#   --resource-group $RESOURCE_GROUP `
+#   --name CustomScript `
+#   --version 2.0 `
+#   --publisher Microsoft.Azure.Extensions `
+#   --settings '{ \"fileUris\": [\"https://raw.githubusercontent.com/embergershared/aca-full-private-app/main/ado-selfhosted-private-vmss/post-install.sh\"], \"commandToExecute\": \"bash ./post-install.sh\" }'
 ```
-
-
-
-
 
 ## References
 
