@@ -36,9 +36,27 @@ stages:
       inputs:
         targetType: 'inline'
         script: |
-          # Write your commands here
-          
-          echo 'Hello world'
+          # We replace the ACR placeholder in Dockerfile with the actual ACR value to use
+          # ACR name to use
+          ACR_NAME=$(ACR_NAME)
+          # File to update
+          DOCKERFILE=$(dockerfilePath)
+          # Check if Dockerfile exists
+          if [ ! -f "$DOCKERFILE" ]; then
+              echo "Error: Dockerfile not found in current directory."
+              exit 1
+          fi
+          # Replace <acr_name> with the actual ACR name
+          sed -i "s/<acr_name>/${ACR_NAME}/g" "$DOCKERFILE"
+          # Verify the replacement
+          if grep -q "<acr_name>" "$DOCKERFILE"; then
+              echo "Error: Not all placeholders were replaced. Please check the Dockerfile."
+              exit 1
+          else
+              echo "Success: All <acr_name> placeholders in Dockerfile have been replaced with ${ACR_NAME}."
+              echo "Updated Dockerfile content:"
+              cat "$DOCKERFILE"
+          fi
     - task: Docker@2
       displayName: Build and push an image to container registry
       inputs:
