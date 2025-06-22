@@ -1,6 +1,4 @@
-# Docker
-# Build and push an image to Azure Container Registry
-# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+# Build and push Docker image for Album API
 
 # trigger:
 # - main
@@ -10,7 +8,7 @@ resources:
 
 variables:
 - group: Album_Api_Build
-  # Container registry service connection established during pipeline creation
+- group: Album_Api_ACA
 - name: imageRepository
   value: 'eb-apps/album-api'
 - name: containerRegistry
@@ -19,8 +17,6 @@ variables:
   value: 'containerapps-albumapi-csharp/src'
 - name: dockerfilePath
   value: '$(Build.SourcesDirectory)/$(sourcePath)/Dockerfile'
-# - name: tag
-#   value: '$(Build.BuildId)'
 
 stages:
 - stage: Build
@@ -32,7 +28,7 @@ stages:
       name: $(PRIVATE_AGENT_POOL_NAME)
     steps:
     - task: Bash@3
-      displayName: Replace Dockerfile placeholders with ACR name
+      displayName: Dockerfile token replace
       inputs:
         targetType: 'inline'
         script: |
@@ -58,7 +54,7 @@ stages:
               cat "$DOCKERFILE"
           fi
     - task: AzureCLI@2
-      displayName: Docker Build and Push to ACR
+      displayName: Image Build and Push to ACR
       inputs:
         azureSubscription: 'ME-MngEnvMCAP391575-emberger-4(b8e2cc57-9620-431e-9293-4318e720ba07)'
         scriptType: 'bash'
@@ -77,3 +73,14 @@ stages:
             echo "==========================================================================="
             echo "Pushing image $(containerRegistry)/$(imageRepository):$(Build.BuildId) to ACR"
             docker push "$(containerRegistry)/$(imageRepository):$(Build.BuildId)"
+    - task: AzureCLI@2
+      displayName: Create Container App revision with new image
+      inputs:
+        azureSubscription: 'ME-MngEnvMCAP391575-emberger-4(b8e2cc57-9620-431e-9293-4318e720ba07)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+            echo
+            echo "==========================================================================="
+            echo "Creating new revision of Azure Container App $(CONTAINER_APP_NAME) by revision copy, with image $(containerRegistry)/$(imageRepository):$(Build.BuildId)"
+            az containerapp revision copy -n $(CONTAINER_APP_NAME) -g $(CONTAINER_APP_RG) --image "$(containerRegistry)/$(imageRepository):$(Build.BuildId)"
