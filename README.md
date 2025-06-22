@@ -250,11 +250,12 @@ az network bastion create `
 
 # Create and link the required Private DNS Zones on the VNet
 $privateDnsZones = @(
-    "privatelink.vaultcore.azure.net",       # For Key Vault
-    "privatelink.azurecr.io",                # For Azure Container Registry
-    "privatelink.blob.core.windows.net",     # For Azure Storage Account
-    "privatelink.monitor.azure.com",         # For Log Analytics Workspace
-    "privatelink.${LOCATION}.azurecontainerapps.io"      # For Azure Container Apps
+    "privatelink.vaultcore.azure.net",              # For Key Vault
+    "privatelink.azurecr.io",                       # For Azure Container Registry
+    "privatelink.blob.core.windows.net",            # For Azure Storage Account
+    "privatelink.monitor.azure.com",                # For Log Analytics Workspace
+    "privatelink.servicebus.windows.net",           # For Service Bus
+    "privatelink.${LOCATION}.azurecontainerapps.io" # For Azure Container Apps
 )
 
 foreach ($zone in $privateDnsZones) {

@@ -15,14 +15,28 @@ pool:
 steps:
 - script: |
     echo 'NSLOOKUP Key vault'
-    nslookup kv-aca-albumapi-384.vault.azure.net
+    nslookup $(KV_NAME).vault.azure.net
     echo 'CURL Key vault'
-    curl https://kv-aca-albumapi-384.vault.azure.net/
+    curl https://$(KV_NAME).vault.azure.net/
   displayName: 'Private Key vault check'
 
 - script: |
     echo 'NSLOOKUP ACR'
     nslookup $(ACR_NAME).azurecr.io
-    echo 'CURL ACR'
+    echo 'CURL Container Registry'
     curl https://$(ACR_NAME).azurecr.io/
   displayName: 'Private Container Registry check'
+
+- script: |
+    echo 'NSLOOKUP Storage Account'
+    nslookup $(ST_ACCT_NAME).blob.core.windows.net
+    echo 'CURL Storage Account'
+    curl https://$(ST_ACCT_NAME).blob.core.windows.net/
+  displayName: 'Private Storage Account check'
+
+# - script: |
+#     echo 'NSLOOKUP Service Bus'
+#     nslookup $(SB_NS_NAME).azurecr.io
+#     echo 'CURL Service Bus'
+#     curl https://$(SB_NS_NAME).azurecr.io/
+#   displayName: 'Private Service Bus namespace check'
