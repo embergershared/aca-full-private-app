@@ -64,10 +64,16 @@ stages:
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
+            echo
+            echo "==========================================================================="
             echo "ACR Name: $(ACR_NAME)"
             echo "Logging in to ACR"
             az acr login -n $(ACR_NAME)
+            echo
+            echo "==========================================================================="
             echo "Building Docker image: $(containerRegistry)/$(imageRepository):$(Build.BuildId)"
             docker build -t "$(containerRegistry)/$(imageRepository):$(Build.BuildId)" containerapps-albumapi-csharp/src
-            echo "Pusing image to ACR"
+            echo
+            echo "==========================================================================="
+            echo "Pushing image $(containerRegistry)/$(imageRepository):$(Build.BuildId) to ACR"
             docker push "$(containerRegistry)/$(imageRepository):$(Build.BuildId)"
