@@ -1,0 +1,75 @@
+# Docker
+# Build and push an image to Azure Container Registry
+# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+
+trigger:
+- main
+
+resources:
+- repo: self
+
+variables:
+- group: Album_Api_Build
+  # Container registry service connection established during pipeline creation
+- name: dockerRegistryServiceConnection
+  value: '8c7c8275-e8e0-44a0-b4e8-8ccdbe92a577'
+- name: imageRepository
+  value: 'eb-apps/album-api'
+- name: containerRegistry
+  value: '$(ACR_NAME).azurecr.io'
+- name: dockerfilePath
+  value: '$(Build.SourcesDirectory)/containerapps-albumapi-csharp/src/Dockerfile'
+- name: tag
+  value: '$(Build.BuildId)'
+
+stages:
+- stage: Build
+  displayName: Build and push stage
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      name: $(PRIVATE_AGENT_POOL_NAME)
+    steps:
+    - task: Bash@3
+      displayName: Replace Dockerfile placeholders with ACR name
+      inputs:
+        targetType: 'inline'
+        script: |
+          # We replace the ACR placeholder in Dockerfile with the actual ACR value to use
+          # ACR name to use
+          ACR_NAME=$(ACR_NAME)
+          # File to update
+          DOCKERFILE=$(dockerfilePath)
+          # Check if Dockerfile exists
+          if [ ! -f "$DOCKERFILE" ]; then
+              echo "Error: Dockerfile not found in current directory."
+              exit 1
+          fi
+          # Replace <acr_name> with the actual ACR name
+          sed -i "s/<acr_name>/${ACR_NAME}/g" "$DOCKERFILE"
+          # Verify the replacement
+          if grep -q "<acr_name>" "$DOCKERFILE"; then
+              echo "Error: Not all placeholders were replaced. Please check the Dockerfile."
+              exit 1
+          else
+              echo "Success: All <acr_name> placeholders in Dockerfile have been replaced with ${ACR_NAME}."
+              echo "Updated Dockerfile content:"
+              cat "$DOCKERFILE"
+          fi
+    # - task: Docker@2
+    #   displayName: Build and push an image to container registry
+    #   inputs:
+    #     command: buildAndPush
+    #     repository: $(imageRepository)
+    #     dockerfile: $(dockerfilePath)
+    #     containerRegistry: $(dockerRegistryServiceConnection)
+    #     tags: |
+    #       $(tag)
+    - task: Bash@3
+      displayName: Docker Build and Push to ACR
+      inputs:
+        targetType: 'inline'
+        script: |
+            docker build -t "$(containerRegistry)/$(imageRepository):$(tag)" containerapps-albumapi-csharp/src
+            docker push "$(containerRegistry)/$(imageRepository):$(tag)"
