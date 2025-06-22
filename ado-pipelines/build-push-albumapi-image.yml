@@ -11,16 +11,16 @@ resources:
 variables:
 - group: Album_Api_Build
   # Container registry service connection established during pipeline creation
-- name: dockerRegistryServiceConnection
-  value: '8c7c8275-e8e0-44a0-b4e8-8ccdbe92a577'
 - name: imageRepository
   value: 'eb-apps/album-api'
 - name: containerRegistry
   value: '$(ACR_NAME).azurecr.io'
+- name: sourcePath
+  value: 'containerapps-albumapi-csharp/src'
 - name: dockerfilePath
-  value: '$(Build.SourcesDirectory)/containerapps-albumapi-csharp/src/Dockerfile'
-- name: tag
-  value: '$(Build.BuildId)'
+  value: '$(Build.SourcesDirectory)/$(sourcePath)/Dockerfile'
+# - name: tag
+#   value: '$(Build.BuildId)'
 
 stages:
 - stage: Build
@@ -67,12 +67,12 @@ stages:
             echo
             echo "==========================================================================="
             echo "ACR Name: $(ACR_NAME)"
-            echo "Logging in to ACR"
+            echo "Logging in to ACR $(ACR_NAME)"
             az acr login -n $(ACR_NAME)
             echo
             echo "==========================================================================="
             echo "Building Docker image: $(containerRegistry)/$(imageRepository):$(Build.BuildId)"
-            docker build -t "$(containerRegistry)/$(imageRepository):$(Build.BuildId)" containerapps-albumapi-csharp/src
+            docker build -t "$(containerRegistry)/$(imageRepository):$(Build.BuildId)" $(sourcePath)
             echo
             echo "==========================================================================="
             echo "Pushing image $(containerRegistry)/$(imageRepository):$(Build.BuildId) to ACR"
