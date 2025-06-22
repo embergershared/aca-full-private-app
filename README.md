@@ -77,11 +77,12 @@ if (-not $LOCATION) {
     $LOCATION = Read-Host "Enter your Azure region (e.g., eastus, westeurope)"
 }
 az group create --name $RESOURCE_GROUP --location $LOCATION
+```
 
+```pwsh
 # Create ACR, build container image and push it to the ACR
 az acr create -n $ACR_NAME -g $RESOURCE_GROUP --sku Premium --location $LOCATION --public-network-enabled true
 az acr build -t "${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" -r $ACR_NAME git/containerapps-albumapi-csharp/src
-
 
 # Create a Storage Account, LAW and an Container App Environment
 az storage account create `
@@ -167,7 +168,6 @@ Now we deploy, adding VNet integration and private access on all the resources.
 It will lead to deploy and use a jumpbox in the VNet to complete the deployment.
 
 ```pwsh
-
 #----FUNCTIONS----
 ## Generate admin password and store it in Key vault
 function GeneratePassword {
@@ -191,7 +191,9 @@ function GeneratePassword {
     return $password
 }
 #--END FUNCTIONS----
+```
 
+````pwsh
 #----BEGIN VARIABLES----
 $RANDOM_SUFFIX = $(Get-Random -Minimum 100 -Maximum 999)
 
@@ -231,17 +233,25 @@ $BUILD_IMAGE_TAG = "original"
 $ENVIRONMENT="aca-env-private-album-api"
 $API_NAME="aca-app-private-album-api"
 
+$MY_PUBLIC_IP = $((Invoke-WebRequest ifconfig.me/ip).Content.Trim())
+# Get the public IP address of the machine running this script
+Write-Host "My Public IP: $MY_PUBLIC_IP"
 #----END VARIABLES----
+```
+
+```pwsh
+#Login to Azure
+az login
+# Select the subscription to use
+az account set --subscription "Your Subscription Name or ID"
+# Get the current user ID to assign permissions
+$CURRENT_USER_ID = az ad signed-in-user show --query userPrincipalName -o tsv
+Write-Host "Current User ID: $CURRENT_USER_ID"
 
 # Create Resource Group
 if (-not $LOCATION) {
     $LOCATION = Read-Host "Enter your Azure region (e.g., eastus, westeurope)"
 }
-
-#Login to Azure
-az login
-# Select the subscription to use
-az account set --subscription "Your Subscription Name or ID"
 
 # Create the Resource Group
 if (az group exists --name $RESOURCE_GROUP) {
@@ -250,7 +260,9 @@ if (az group exists --name $RESOURCE_GROUP) {
     Write-Host "Creating Resource Group $RESOURCE_GROUP in $LOCATION..."
 }
 az group create --name $RESOURCE_GROUP --location $LOCATION
+```
 
+```pwsh
 # Create a Virtual Network and Subnets
 # Ref: To use a VNet with Container Apps, the VNet must have a dedicated subnet with a CIDR range of /23 or larger when using the Consumption only environemnt, or a CIDR range of /27 or larger when using the workload profiles environment (https://learn.microsoft.com/en-us/azure/container-apps/vnet-custom?tabs=bash&pivots=azure-portal#create-a-virtual-network)
 if (az network vnet exists --name $VNET_NAME --resource-group $RESOURCE_GROUP) {
@@ -387,16 +399,10 @@ foreach ($zone in $privateDnsZones) {
         --virtual-network $VNET_NAME `
         --registration-enabled false
 }
+```
 
+```pwsh
 # Create an Azure Key Vault to store the VM Password
-$MY_PUBLIC_IP = $((Invoke-WebRequest ifconfig.me/ip).Content.Trim())
-# Get the public IP address of the machine running this script
-Write-Host "My Public IP: $MY_PUBLIC_IP"
-# Get the current user ID to assign Key Vault permissions
-$CURRENT_USER_ID = az ad signed-in-user show --query userPrincipalName -o tsv
-Write-Host "Current User ID: $CURRENT_USER_ID"
-
-# Create the Key Vault
 Write-Host "Creating Key Vault $KV_NAME in $RESOURCE_GROUP..."
 az keyvault create `
   --name $KV_NAME `
@@ -419,70 +425,20 @@ az role assignment create `
 --assignee $CURRENT_USER_ID `
 --role "Key Vault Administrator" `
 --scope $KV_ID
+```
 
-#Create an Image Gallery to store the Dev Build VM images
-$GALLERY_NAME = "galleryacaalbumapi$($RANDOM_SUFFIX)"
+### Create an Image Gallery to store the Dev Build VM images
+```pwsh
 
-# Check if the gallery exists
-$galleryExists = $false
-try {
-    $galleryInfo = az sig gallery show --name $GALLERY_NAME --resource-group $RESOURCE_GROUP --query "name" -o tsv 2>$null
-    if ($galleryInfo -eq $GALLERY_NAME) {
-        $galleryExists = $true
-    }
-} catch {}
+write-host "Create a temporary VM to serve as the basis for our image"
 
-if ($galleryExists) {
-    Write-Host "Shared Image Gallery $GALLERY_NAME already exists in $RESOURCE_GROUP. Skipping creation."
-} else {
-    Write-Host "Creating Shared Image Gallery $GALLERY_NAME in $RESOURCE_GROUP..."
-    az sig create `
-        --resource-group $RESOURCE_GROUP `
-        --gallery-name $GALLERY_NAME `
-        --location $LOCATION
-}
+## As of CLI 2.70, the default VM security type is trusted which breaks VM image creation
+az feature register --name UseStandardSecurityType --namespace Microsoft.Compute
+az provider register -n Microsoft.Compute
+# Wait for the feature to be registered and propagated
+start-Sleep -Seconds 30
 
-# Create a Shared Image Gallery Image Definition for the Ubuntu VM
-$IMAGE_DEFINITION_NAME = "ubuntuimgdefacaalbumapi$($RANDOM_SUFFIX)"
-
-# Check if the image definition exists
-$imageDefinitionExists = $false
-try {
-    $imageDefinitionInfo = az sig image-definition show --gallery-name $GALLERY_NAME --gallery-image-definition $IMAGE_DEFINITION_NAME --resource-group $RESOURCE_GROUP --query "name" -o tsv 2>$null
-    if ($imageDefinitionInfo -eq $IMAGE_DEFINITION_NAME) {
-        $imageDefinitionExists = $true
-    }
-} catch {}
-
-if ($imageDefinitionExists) {
-    Write-Host "Shared Image Gallery Image Definition $IMAGE_DEFINITION_NAME already exists in $RESOURCE_GROUP. Skipping creation."
-} else {
-    Write-Host "Creating Shared Image Gallery Image Definition $IMAGE_DEFINITION_NAME in $RESOURCE_GROUP..."
-    az sig image-definition create `
-        --gallery-name $GALLERY_NAME `
-        --gallery-image-definition $IMAGE_DEFINITION_NAME `
-        --resource-group $RESOURCE_GROUP `
-        --os-type Linux `
-        --publisher "EmbergerShared" `
-        --offer "Ubuntu-Dev" `
-        --sku "Ubuntu-Dev-SKU"
-}
-
-# Create a Shared Image Gallery Image Version for the Ubuntu VM
-
-# Create a temporary VM to serve as the basis for our image
 Write-Host "Creating temporary VM $BUILD_AGENT_VM_NAME to prepare as Azure DevOps agent..."
-
-# Save VM credentials to Key Vault
-az keyvault secret set `
-    --vault-name $KV_NAME `
-    --name $BUILD_AGENT_ADMIN_USERNAME_KV_SECRET_NAME `
-    --value $BUILD_AGENT_VM_ADMIN_USERNAME
-
-az keyvault secret set `
-    --vault-name $KV_NAME `
-    --name $BUILD_AGENT_ADMIN_PASSWORD_KV_SECRET_NAME `
-    --value $BUILD_AGENT_VM_ADMIN_PASSWORD
 
 # Create the VM with Standard security type (not TrustedLaunch)
 Write-Host "Creating temporary VM $BUILD_AGENT_VM_NAME in $RESOURCE_GROUP..."
@@ -499,6 +455,18 @@ az vm create `
     --nsg-rule NONE `
     --enable-secure-boot false `
     --enable-vtpm false
+
+# Save VM credentials to Key Vault
+write-host "Storing VM credentials in Key Vault $KV_NAME..."
+az keyvault secret set `
+    --vault-name $KV_NAME `
+    --name $BUILD_AGENT_ADMIN_USERNAME_KV_SECRET_NAME `
+    --value $BUILD_AGENT_VM_ADMIN_USERNAME
+
+az keyvault secret set `
+    --vault-name $KV_NAME `
+    --name $BUILD_AGENT_ADMIN_PASSWORD_KV_SECRET_NAME `
+    --value $BUILD_AGENT_VM_ADMIN_PASSWORD
 
 # Create the installation script content as a PowerShell variable
 $installScript = @'
@@ -553,20 +521,93 @@ Remove-Item -Path $tempFile.FullName
 Write-Host "Waiting for installations to complete..."
 Start-Sleep -Seconds 60
 
+````
+
+### Create a Shared Image Gallery and Image Definition
+
+````pwsh
+$GALLERY_NAME = "galleryacaalbumapi$($RANDOM_SUFFIX)"
+write-host "Creating Shared Image Gallery $GALLERY_NAME in $RESOURCE_GROUP..."
+# Check if the gallery exists
+$galleryExists = $false
+try {
+    Write-Host "Checking if Shared Image Gallery $GALLERY_NAME exists in $RESOURCE_GROUP..."
+    $galleryInfo = az sig gallery show --name $GALLERY_NAME --resource-group $RESOURCE_GROUP --query "name" -o tsv 2>$null
+    if ($galleryInfo -eq $GALLERY_NAME) {
+        $galleryExists = $true
+    }
+} catch {}
+
+if ($galleryExists) {
+    Write-Host "Shared Image Gallery $GALLERY_NAME already exists in $RESOURCE_GROUP. Skipping creation."
+} else {
+    Write-Host "Creating Shared Image Gallery $GALLERY_NAME in $RESOURCE_GROUP..."
+    az sig create `
+        --resource-group $RESOURCE_GROUP `
+        --gallery-name $GALLERY_NAME `
+        --location $LOCATION
+}
+
+# Create a Shared Image Gallery Image Definition for the Ubuntu VM
+
+# Check if the image definition exists
+$imageDefinitionExists = $false
+try {
+    $imageDefinitionInfo = az sig image-definition show --gallery-name $GALLERY_NAME --gallery-image-definition $BUILD_AGENT_MANAGED_IMAGE_NAME --resource-group $RESOURCE_GROUP --query "name" -o tsv 2>$null
+    if ($imageDefinitionInfo -eq $BUILD_AGENT_MANAGED_IMAGE_NAME) {
+        $imageDefinitionExists = $true
+    }
+} catch {}
+
+if ($imageDefinitionExists) {
+    Write-Host "Shared Image Gallery Image Definition $BUILD_AGENT_MANAGED_IMAGE_NAME already exists in $RESOURCE_GROUP. Skipping creation."
+} else {
+    Write-Host "Creating Shared Image Gallery Image Definition $BUILD_AGENT_MANAGED_IMAGE_NAME in $RESOURCE_GROUP..."
+    az sig image-definition create `
+        --gallery-name $GALLERY_NAME `
+        --gallery-image-definition $BUILD_AGENT_MANAGED_IMAGE_NAME `
+        --resource-group $RESOURCE_GROUP `
+        --os-type Linux `
+        --publisher "EmbergerShared" `
+        --offer "Ubuntu-Dev" `
+        --sku "Ubuntu-Dev-SKU" `
+        --hyper-v-generation V2 `
+        --description "Ubuntu VM for Azure DevOps agent with Docker, Azure CLI, PowerShell, and .NET SDK pre-installed"
+        --TrustedLaunch false `
+        --security-type Standard
+}
+
 # Generalize (Sysprep) the VM - this makes it suitable for creating an image
 Write-Host "Generalizing VM $BUILD_AGENT_VM_NAME..."
 az vm deallocate --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME
 az vm generalize --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME
 
-# Create a managed image from the VM
-Write-Host "Creating managed image $BUILD_AGENT_MANAGED_IMAGE_NAME from VM $BUILD_AGENT_VM_NAME..."
+# Get the VM's OS disk ID
+$VM_OS_DISK_ID=$(az vm show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --query "storageProfile.osDisk.managedDisk.id" -o tsv)
+Write-Host "VM OS Disk ID: $VM_OS_DISK_ID"
+
+# Get the OS disk name
+$VM_OS_DISK_NAME=$(az disk show --ids $VM_OS_DISK_ID --query "name" -o tsv)
+Write-Host "VM OS Disk Name: $VM_OS_DISK_NAME"
+
+# Create a snapshot of the OS disk
+$SNAPSHOT_NAME="$BUILD_AGENT_VM_NAME-snapshot"
+Write-Host "Creating snapshot $SNAPSHOT_NAME from OS disk..."
+az snapshot create `
+    --resource-group $RESOURCE_GROUP `
+    --name $SNAPSHOT_NAME `
+    --source $VM_OS_DISK_ID
+
+Write-Host "Creating managed image $BUILD_AGENT_MANAGED_IMAGE_NAME from snapshot..."
 az image create `
     --resource-group $RESOURCE_GROUP `
     --name $BUILD_AGENT_MANAGED_IMAGE_NAME `
-    --source $BUILD_AGENT_VM_NAME
+    --os-type Linux `
+    --source $SNAPSHOT_NAME `
+    --hyper-v-generation V2
 
 # Get the managed image ID
-$MANAGED_IMAGE_ID = $(az image show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_MANAGED_IMAGE_NAME --query id -o tsv)
+$MANAGED_IMAGE_ID=$(az image show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_MANAGED_IMAGE_NAME --query id -o tsv)
 
 # Create an image version in the Shared Image Gallery
 Write-Host "Creating image version $BUILD_AGENT_IMAGE_VERSION_NAME in gallery $GALLERY_NAME..."
@@ -578,13 +619,89 @@ az sig image-version create `
     --managed-image $MANAGED_IMAGE_ID `
     --target-regions $LOCATION `
     --replica-count 1
+```
 
-# Optional: Delete the temporary VM to save costs
+```pwsh
+# Optional: Delete the temporary VM and managed image to save costs
 Write-Host "Cleaning up temporary resources..."
+# Delete the VM
 az vm delete --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --yes
 
----
+# Delete the associated managed disk (OS disk) if not automatically deleted
+$osDiskName = az vm show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --query "storageProfile.osDisk.name" -o tsv
+if ($osDiskName) {
+    Write-Host "Deleting OS disk: $osDiskName"
+    az disk delete --resource-group $RESOURCE_GROUP --name $osDiskName --yes
+}
 
+# Delete any data disks if they exist
+$dataDiskIds = az vm show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --query "storageProfile.dataDisks[].managedDisk.id" -o tsv
+foreach ($diskId in $dataDiskIds) {
+    if ($diskId) {
+        $diskName = $diskId.Split('/')[-1]
+        Write-Host "Deleting data disk: $diskName"
+        az disk delete --ids $diskId --yes
+    }
+}
+
+# Delete the associated NIC
+$nicIds = az vm show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --query "networkProfile.networkInterfaces[].id" -o tsv
+foreach ($nicId in $nicIds) {
+    if ($nicId) {
+        Write-Host "Deleting network interface: $nicId"
+        az network nic delete --ids $nicId
+    }
+}
+
+# Optionally delete the managed image after it's been added to the gallery
+az image delete --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_MANAGED_IMAGE_NAME
+
+```
+
+### Create a VMSS to host the Azure DevOps agent
+
+```pwsh
+# Create a VMSS to host the Azure DevOps agent
+$VMSS_NAME = "vmss-ado-agent-albumapi-$($RANDOM_SUFFIX)"
+$VMSS_ADMIN_USERNAME = "adoagentadmin"
+$VMSS_ADMIN_PASSWORD = GeneratePassword 18
+$VMSS_ADMIN_USERNAME_KV_SECRET_NAME = "$($VMSS_NAME)-admin-username"
+$VMSS_ADMIN_PASSWORD_KV_SECRET_NAME = "$($VMSS_NAME)-admin-password"
+
+# Create the VMSS with the managed image from the Shared Image Gallery
+az vmss create `
+    --resource-group $RESOURCE_GROUP `
+    --name $VMSS_NAME `
+    --image "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Compute/galleries/$GALLERY_NAME/images/$IMAGE_DEFINITION_NAME/versions/$BUILD_IMAGE_VERSION_NAME" `
+    --admin-username $VMSS_ADMIN_USERNAME `
+    --admin-password $VMSS_ADMIN_PASSWORD `
+    --vnet-name $VNET_NAME `
+    --subnet $WKLD_SUBNET_NAME `
+    --instance-count 1 `
+    --upgrade-policy-mode Automatic `
+    --nsg-rule NONE `
+    --public-ip-address '""' `
+    --load-balancer '' `
+    --custom-data "echo 'This is a VMSS for Azure DevOps agents'" `
+    --no-wait
+Write-Host "VMSS $VMSS_NAME created in $RESOURCE_GROUP with username $VMSS_ADMIN_USERNAME."
+
+# Store the VMSS admin credentials in Key Vault
+az keyvault secret set `
+    --vault-name $KV_NAME `
+    --name $VMSS_ADMIN_USERNAME_KV_SECRET_NAME `
+    --value $VMSS_ADMIN_USERNAME
+
+az keyvault secret set `
+    --vault-name $KV_NAME `
+    --name $VMSS_ADMIN_PASSWORD_KV_SECRET_NAME `
+    --value $VMSS_ADMIN_PASSWORD
+Write-Host "VMSS credentials stored in Key Vault $KV_NAME."
+
+```
+### Create a Windows Jumpbox VM in the VNet to access the resources privately
+
+```pwsh```
 # Create a Windows Jumpbox VM in the VNet
 # Generate the password for the Developer VM
 $JUMPBOX_ADMIN_PASSWORD = GeneratePassword 18
@@ -619,11 +736,7 @@ az keyvault secret set `
 Write-Host "Jumpbox VM credentials stored in Key Vault $KV_NAME."
 ```
 
-### Use the Jumpbox VM
-
-#### Login to the Jumpbox VM
-
-##### Using Azure Bastion in Browser RDP client
+#### Login to the Jumpbox VM by using Azure Bastion
 
 - In the Azure Portal, use `Connect via Bastion` to login the Jumpbox VM
 
@@ -631,11 +744,13 @@ Write-Host "Jumpbox VM credentials stored in Key Vault $KV_NAME."
   
   - Authentication Type: `Password from Azure Key Vault`
   
-  - Enter the user name (default is `acaadmin` from the script)
+  - Enter the user name (default is `acaadmin` from the script variable `$JUMPBOX_ADMIN_USERNAME`)
   
   - Select the Key Vault
   
-  - Select the Kay Vault Secret
+  - Select the Kay Vault Secret 
+    - For the username, select the secret named `[JUMPBOX_NAME]-admin-username`
+    - For the password, select the secret name `[JUMPBOX_NAME]-admin-password`
 
   - Click `Connect`
 
