@@ -1,0 +1,39 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+variables:
+- group: Album_Api_Build
+
+pool:
+  name: $(PRIVATE_AGENT_POOL_NAME)
+
+steps:
+- script: echo Hello, world!
+  displayName: 'Run a one-line script'
+
+- script: |
+    echo Add other tasks to build, test, and deploy your project.
+    echo See https://aka.ms/yaml
+  displayName: 'Run a multi-line script'
+
+- task: AzureContainerApps@1
+  inputs:
+    appSourcePath: 'containerapps-albumapi-csharp/src'
+    azureSubscription: 'ME-MngEnvMCAP391575-emberger-4(b8e2cc57-9620-431e-9293-4318e720ba07)'
+    acrName: 'acracaalbumapi384'
+    acrUsername: 'acr_user'
+    acrPassword: 'acr_pwd'
+    dockerfilePath: 'containerapps-albumapi-csharp/src'
+    imageToBuild: 'acracaalbumapi384.azurecr.io/eb-apps/album-api:69'
+    imageToDeploy: 'acracaalbumapi384.azurecr.io/eb-apps/album-api:69'
+    containerAppName: 'aca-app-private-album-api'
+    resourceGroup: 'rg-aca-quickstart-album-api-04'
+    containerAppEnvironment: 'aca-env-private-album-api'
+    targetPort: '8080'
+    location: 'southcentralus'
+    ingress: 'internal'
