@@ -1,21 +1,63 @@
 # Azure Container App - Sample app Private
 
-## Links
-
-Application is a Basic C# .NET core WebAPI.
-It's source code is here: [Build and deploy from local source code to Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/quickstart-code-to-cloud?tabs=bash%2Ccsharp)
-
 ## Overview
 
-The aim is to deploy it fully private, with no public access, and to use a VNet to connect to the Azure Container App.
+This repository display and contains the various components to deploy sample applications to Azure Container Apps, with a focus on private access using a Virtual Network (VNet).
 
-The deployment is done in steps:
+It contains 2 sample applications:
 
-1. Quick deployment, Public access, using `az containerapp up`
-2. Controlled full deployment, Public access, using `az cli` for all components
-3. Controlled full deployment, Private access, using `az cli` for all components
+- A C# .NET Core 8.0 WebAPI application that serves as a simple album API.
+- A Python FlaskAPI application that serves as a simple album API.
 
-## Common pre-requisite steps
+Both sample apps are coming from [Build and deploy from local source code to Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/quickstart-code-to-cloud?tabs=bash%2Ccsharp), and their respective original source code are:
+
+- [C# .NET Core 8.0 WebAPI](https://learn.microsoft.com/en-us/azure/container-apps/quickstart-code-to-cloud?tabs=bash%2Ccsharp)
+- [Python FlaskAPI](https://learn.microsoft.com/en-us/azure/developer/python/tutorial-containerize-simple-web-app?tabs=web-app-fastapi)
+
+The following code in this README contains the Azure CLI commands to deploy all the Azure resources required, and appropriately configured to run the applications in a full Private Azure Container Apps successfully
+
+It mainly covers the following resources:
+
+- Resource Group
+- Virtual Network
+- Subnets
+- Private DNS Zones & links
+- Azure Bastion
+- Azure Virtual Machine, used as a Jumpbox - since networking and data planes are private
+- Azure Key Vault
+- Azure Shared Image Gallery with a templating VM build steps
+- Azure Virtual Machine Scale Set (VMSS), used as Azure DevOps self-hosted agents
+- Azure Container Registry
+- Azure Storage Account
+- Log Analytics Workspace
+- Application Insights
+- Azure Container Apps Environment
+- Azure Container App
+
+To use the Azure DevOps Pipelines, an Azure DevOps organization and project is required, with the appropriate permissions to create and manage resources in Azure (service connection) and self-hosted agent pool leveraging the Azure VMSS (or other options chosen).
+
+## **Important remark**
+
+- This deployment **is NOT following the Microsoft recommended architecture** to deploy Azure Landing Zones and follow Azure Cloud Adoption Framework. It is meant to reproduce an actual customer scenario, which current Azure adoption practices do not follow fully Microsoft's recommendations.
+- Some of the key items missing in the following deployment are:
+  - Azure Enterprise Platform Landing Zone in 3 subscriptions: Identity, Network, and Management,
+  - Planned management practices, such as Azure Policy, and Azure Monitor,
+  - DNS resolution planning and implementation between on-premises and Azure,
+  - Azure Firewall (or Network Virtual Appliance) and User Defined Route Tables, to control traffic (to/from on-premises, to/from Public internet, and to/from Azure services),
+  - Application Landing Zones with VNet peering and private endpoints,
+  - etc.
+- The official documentation for Azure Enterprise Platform Landing Zone is available here: [Azure Enterprise-Scale landing zone architecture](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/enterprise-scale/architecture).
+
+## How to deploy
+
+There are 2 files to use to deploy:
+
+1. the content following in this file: allows to deploy, using Azure CLI (PowerShell flavored),
+2. the file `aca-deploy-public.md` that deploys the same application, but with public access, using `az containerapp up` command, as a "Public" example.
+
+## Full Private deployment steps
+
+### Pre-requisites
 
 ```pwsh
 az login
@@ -25,147 +67,7 @@ az provider register --namespace Microsoft.App
 az provider register --namespace Microsoft.OperationalInsights
 ```
 
-## 1. Quick deployment Option - Public
-
-```pwsh
-$RESOURCE_GROUP="rg-aca-quickstart-album-api-01"
-$LOCATION="southcentralus"
-
-$ENVIRONMENT="aca-env-quick-album-api"
-$API_NAME="aca-app-quick-album-api"
-
-az containerapp up `
-  --name $API_NAME `
-  --resource-group $RESOURCE_GROUP `
-  --location $LOCATION `
-  --environment $ENVIRONMENT `
-  --source containerapps-albumapi-csharp/src
-
-# Access: https://aca-app-album-api.calmsmoke-9a6a4343.southcentralus.azurecontainerapps.io/albums
-# See logs: az containerapp logs show -n aca-app-album-api -g rg-aca-quickstart-album-api
-```
-
-## 2. Controlled Full deployment Option - Public
-
-### `az containerapp up` does
-
-- Create the resource group
-- Create an Azure Container Registry
-- Build the container image and push it to the registry
-- Create the Container Apps environment with a Log Analytics workspace
-- Create and deploy the container app using the built container image
-
-### So we do these manually, in another Resource Group
-
-```pwsh
-$RESOURCE_GROUP="rg-aca-quickstart-album-api-02"
-$LOCATION="southcentralus"
-
-$RANDOM_SUFFIX = $(Get-Random -Minimum 100 -Maximum 999)
-
-$ACR_NAME = "acracaqsalbapi$($RANDOM_SUFFIX)"
-$LOG_ANALYTICS_WORKSPACE="law-aca-albumapi-$($RANDOM_SUFFIX)"
-$STORAGE_ACCOUNT="stacaalbumapi$($RANDOM_SUFFIX)"
-$BUILD_IMAGE_NAME = "eb-apps/album-api"
-$BUILD_IMAGE_TAG = "original"
-
-$ENVIRONMENT="aca-env-manual-album-api"
-$API_NAME="aca-app-manual-album-api"
-
-# Create Resource Group
-if (-not $LOCATION) {
-    $LOCATION = Read-Host "Enter your Azure region (e.g., eastus, westeurope)"
-}
-az group create --name $RESOURCE_GROUP --location $LOCATION
-```
-
-```pwsh
-# Create ACR, build container image and push it to the ACR
-az acr create -n $ACR_NAME -g $RESOURCE_GROUP --sku Premium --location $LOCATION --public-network-enabled true
-az acr build -t "${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" -r $ACR_NAME git/containerapps-albumapi-csharp/src
-
-# Create a Storage Account, LAW and an Container App Environment
-az storage account create `
-    --name $STORAGE_ACCOUNT `
-    --resource-group $RESOURCE_GROUP `
-    --location $LOCATION `
-    --sku Standard_LRS `
-    --kind StorageV2
-
-az monitor log-analytics workspace create `
-    --resource-group $RESOURCE_GROUP `
-    --workspace-name $LOG_ANALYTICS_WORKSPACE `
-    --location $LOCATION
-
-# Get the Log Analytics Client ID and Client Secret
-$LOG_ANALYTICS_WORKSPACE_CLIENT_ID=az monitor log-analytics workspace show --resource-group $RESOURCE_GROUP --workspace-name $LOG_ANALYTICS_WORKSPACE --query customerId -o tsv
-$LOG_ANALYTICS_WORKSPACE_CLIENT_SECRET=az monitor log-analytics workspace get-shared-keys --resource-group $RESOURCE_GROUP --workspace-name $LOG_ANALYTICS_WORKSPACE --query primarySharedKey -o tsv
-
-# Create the Container App Environment
-az containerapp env create `
-    --name $ENVIRONMENT `
-    --resource-group $RESOURCE_GROUP `
-    --location $LOCATION `
-    --logs-workspace-id $LOG_ANALYTICS_WORKSPACE_CLIENT_ID `
-    --logs-workspace-key $LOG_ANALYTICS_WORKSPACE_CLIENT_SECRET `
-    --enable-workload-profiles true `
-    --internal-only false `
-    --storage-account $STORAGE_ACCOUNT
-
-# Add the Dedicated D4 workload profile to the environment (required for VNet integration)
-az containerapp env workload-profile add `
-    --name $ENVIRONMENT `
-    --resource-group $RESOURCE_GROUP `
-    --workload-profile-name Dedicated-D4 `
-    --workload-profile-type D4 `
-    --min-nodes 1 `
-    --max-nodes 3
-
-# Create a Private Endpoint for Container App Environment
-$ACA_ENV_ID=$(az containerapp env show --name $ENVIRONMENT --resource-group $RESOURCE_GROUP --query id -o tsv)
-
-az network private-endpoint create `
-    --name "$($ENVIRONMENT)-pe" `
-    --resource-group $RESOURCE_GROUP `
-    --vnet-name $VNET_NAME `
-    --subnet $PE_SUBNET_NAME `
-    --private-connection-resource-id $ACA_ENV_ID `
-    --group-id managedEnvironments `
-    --nic-name "$($ENVIRONMENT)-pe-nic" `
-    --connection-name "conn-aca-env"
-
-# Create DNS records for the Container App Environment private endpoint
-$ACA_PE_NIC_ID=$(az network private-endpoint show --name "$($ENVIRONMENT)-pe" --resource-group $RESOURCE_GROUP --query 'networkInterfaces[0].id' -o tsv)
-$ACA_ENV_PRIVATE_IP=$(az network nic show --ids $ACA_PE_NIC_ID --query "ipConfigurations[0].privateIPAddress" -o tsv)
-
-# The Container App Environment DNS record needs to be a wildcard to support all apps
-az network private-dns record-set a create --name "*" --zone-name "privatelink.azurecontainerapps.io" --resource-group $RESOURCE_GROUP
-az network private-dns record-set a add-record --record-set-name "*" --zone-name "privatelink.azurecontainerapps.io" --resource-group $RESOURCE_GROUP --ipv4-address $ACA_ENV_PRIVATE_IP
-
-
-# Get the ACR login server
-$ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query loginServer -o tsv)
-
-# Create and deploy the Container App WebAPI
-az containerapp create `
-    --name $API_NAME `
-    --resource-group $RESOURCE_GROUP `
-    --environment $ENVIRONMENT `
-    --image "${ACR_LOGIN_SERVER}/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" `
-    --registry-identity system `
-    --target-port 8080 `
-    --ingress internal `
-    --workload-profile-name Dedicated-D4 `
-    --min-replicas 1 `
-    --max-replicas 3 `
-    --registry-server $ACR_LOGIN_SERVER `
-    --query properties.configuration.ingress.fqdn
-```
-
-## 3. Controlled Full deployment Option - Private
-
-Now we deploy, adding VNet integration and private access on all the resources.
-It will lead to deploy and use a jumpbox in the VNet to complete the deployment.
+### PowerShell functions
 
 ```pwsh
 #----FUNCTIONS----
@@ -193,7 +95,9 @@ function GeneratePassword {
 #--END FUNCTIONS----
 ```
 
-````pwsh
+### Variables
+
+```pwsh
 #----BEGIN VARIABLES----
 $RANDOM_SUFFIX = $(Get-Random -Minimum 100 -Maximum 999)
 
@@ -226,6 +130,13 @@ $BUILD_AGENT_ADMIN_PASSWORD_KV_SECRET_NAME="$($BUILD_AGENT_VM_NAME)-admin-passwo
 $BUILD_AGENT_MANAGED_IMAGE_NAME = "mi-ubuntu-ado-agent"
 $BUILD_AGENT_IMAGE_VERSION_NAME = "1.0.0"
 
+# VMSS ADO agent variables
+$VMSS_NAME = "vmss-ado-agent-albumapi-$($RANDOM_SUFFIX)"
+$VMSS_ADMIN_USERNAME = "adoagentadmin"
+$VMSS_ADMIN_PASSWORD = GeneratePassword 18
+$VMSS_ADMIN_USERNAME_KV_SECRET_NAME = "$($VMSS_NAME)-admin-username"
+$VMSS_ADMIN_PASSWORD_KV_SECRET_NAME = "$($VMSS_NAME)-admin-password"
+
 # Container App build variables
 $BUILD_IMAGE_NAME = "eb-apps/album-api"
 $BUILD_IMAGE_TAG = "original"
@@ -238,6 +149,8 @@ $MY_PUBLIC_IP = $((Invoke-WebRequest ifconfig.me/ip).Content.Trim())
 Write-Host "My Public IP: $MY_PUBLIC_IP"
 #----END VARIABLES----
 ```
+
+### Login to Azure and create the Resource Group
 
 ```pwsh
 #Login to Azure
@@ -262,6 +175,8 @@ if (az group exists --name $RESOURCE_GROUP) {
 az group create --name $RESOURCE_GROUP --location $LOCATION
 ```
 
+### Create the Virtual Network and Subnets
+
 ```pwsh
 # Create a Virtual Network and Subnets
 # Ref: To use a VNet with Container Apps, the VNet must have a dedicated subnet with a CIDR range of /23 or larger when using the Consumption only environemnt, or a CIDR range of /27 or larger when using the workload profiles environment (https://learn.microsoft.com/en-us/azure/container-apps/vnet-custom?tabs=bash&pivots=azure-portal#create-a-virtual-network)
@@ -269,67 +184,77 @@ if (az network vnet exists --name $VNET_NAME --resource-group $RESOURCE_GROUP) {
     Write-Host "Virtual Network $VNET_NAME already exists in $RESOURCE_GROUP. Skipping creation."
 } else {
     Write-Host "Creating Virtual Network $VNET_NAME in $RESOURCE_GROUP..."
-az network vnet create `
-  --address-prefixes 192.168.10.0/23 `
-  --resource-group $RESOURCE_GROUP `
-  --location $LOCATION `
-  --name $VNET_NAME
 
-az network vnet subnet create `
-  --address-prefixes 192.168.10.0/27 `
-  --name $WKLD_SUBNET_NAME `
-  --resource-group $RESOURCE_GROUP `
-  --vnet-name $VNET_NAME
+    az network vnet create `
+    --address-prefixes 192.168.10.0/23 `
+    --resource-group $RESOURCE_GROUP `
+    --location $LOCATION `
+    --name $VNET_NAME
 
-az network vnet subnet create `
-  --address-prefixes 192.168.10.32/27 `
-  --delegations Microsoft.App/environments `
-  --name $ACA_ENV_SUBNET_NAME `
-  --resource-group $RESOURCE_GROUP `
-  --vnet-name $VNET_NAME
+    az network vnet subnet create `
+    --address-prefixes 192.168.10.0/27 `
+    --name $WKLD_SUBNET_NAME `
+    --resource-group $RESOURCE_GROUP `
+    --vnet-name $VNET_NAME
 
-az network vnet subnet create `
-  --address-prefixes 192.168.10.64/27 `
-  --name $PE_SUBNET_NAME `
-  --resource-group $RESOURCE_GROUP `
-  --vnet-name $VNET_NAME `
-  --private-endpoint-network-policies Disabled
+    az network vnet subnet create `
+    --address-prefixes 192.168.10.32/27 `
+    --delegations Microsoft.App/environments `
+    --name $ACA_ENV_SUBNET_NAME `
+    --resource-group $RESOURCE_GROUP `
+    --vnet-name $VNET_NAME
 
-az network vnet subnet create `
-  --address-prefixes 192.168.10.128/27 `
-  --name AzureBastionSubnet `
-  --resource-group $RESOURCE_GROUP `
-  --vnet-name $VNET_NAME
+    az network vnet subnet create `
+    --address-prefixes 192.168.10.64/27 `
+    --name $PE_SUBNET_NAME `
+    --resource-group $RESOURCE_GROUP `
+    --vnet-name $VNET_NAME `
+    --private-endpoint-network-policies Disabled
+
+    az network vnet subnet create `
+    --address-prefixes 192.168.10.128/27 `
+    --name AzureBastionSubnet `
+    --resource-group $RESOURCE_GROUP `
+    --vnet-name $VNET_NAME
 }
+```
 
-# Create Azure Bastion PIP
+### Create Azure Bastion Host
+
+```pwsh
+# Create Azure Bastion Public IP address
 if (az network public-ip exists --name $BASTION_PIP_NAME --resource-group $RESOURCE_GROUP) {
     Write-Host "Public IP $BASTION_PIP_NAME already exists in $RESOURCE_GROUP. Skipping creation."
 } else {
     Write-Host "Creating Public IP $BASTION_PIP_NAME in $RESOURCE_GROUP..."
-}
-az network public-ip create `
-  --name $BASTION_PIP_NAME `
-  --resource-group $RESOURCE_GROUP `
-  --location $LOCATION `
-  --sku Standard
 
+    az network public-ip create `
+    --name $BASTION_PIP_NAME `
+    --resource-group $RESOURCE_GROUP `
+    --location $LOCATION `
+    --sku Standard
+}
 # Create Azure Bastion Host
 if (az network bastion exists --name $BASTION_NAME --resource-group $RESOURCE_GROUP) {
     Write-Host "Bastion Host $BASTION_NAME already exists in $RESOURCE_GROUP. Skipping creation."
 } else {
     Write-Host "Creating Bastion Host $BASTION_NAME in $RESOURCE_GROUP..."
+ 
+    az network bastion create `
+    --name $BASTION_NAME `
+    --resource-group $RESOURCE_GROUP `
+    --location $LOCATION `
+    --public-ip-address $BASTION_PIP_NAME `
+    --vnet-name $VNET_NAME `
+    --sku Standard `
+    --file-copy true `
+    --enable-tunneling true
 }
-az network bastion create `
-  --name $BASTION_NAME `
-  --resource-group $RESOURCE_GROUP `
-  --location $LOCATION `
-  --public-ip-address $BASTION_PIP_NAME `
-  --vnet-name $VNET_NAME `
-  --sku Standard `
-  --file-copy true `
-  --enable-tunneling true
+```
 
+### Create Private DNS Zones and link them to the VNet
+
+```pwsh
 # Create and link the required Private DNS Zones on the VNet
 # Define global (non-region-specific) private DNS zones
 $globalZones = @(
@@ -382,21 +307,28 @@ foreach ($zone in $privateDnsZones) {
     if (az network private-dns zone exists --name $zone --resource-group $RESOURCE_GROUP) {
         Write-Host "Private DNS Zone $zone already exists in $RESOURCE_GROUP. Skipping creation."
         continue
+    } else {
+        Write-Host "Creating Private DNS Zone $zone in $RESOURCE_GROUP..."
+    
+        az network private-dns zone create `
+            --resource-group $RESOURCE_GROUP `
+            --name $zone
     }
-    az network private-dns zone create `
-        --resource-group $RESOURCE_GROUP `
-        --name $zone
     #check if the VNet link already exists
     if (az network private-dns link vnet exists --zone-name $zone --resource-group $RESOURCE_GROUP --name "vnet-link") {
         Write-Host "Private DNS Zone link for $zone already exists in $RESOURCE_GROUP. Skipping creation."
         continue
     }
+    else {
+        Write-Host "Creating Private DNS Zone link for $zone in $RESOURCE_GROUP..."
+    
     az network private-dns link vnet create `
         --resource-group $RESOURCE_GROUP `
         --zone-name $zone `
         --name "vnet-link" `
         --virtual-network $VNET_NAME `
         --registration-enabled false
+    }
 }
 ```
 
@@ -426,14 +358,15 @@ az role assignment create `
 --scope $KV_ID
 ```
 
-### Create an Image Gallery to store the Dev Build VM images
-```pwsh
+### Create a VM to use for the ADO Self-hosted agents template
 
-write-host "Create a temporary VM to serve as the basis for our image"
+```pwsh
+Write-host "Create a temporary VM to serve as the basis for our image"
 
 ## As of CLI 2.70, the default VM security type is trusted which breaks VM image creation
 az feature register --name UseStandardSecurityType --namespace Microsoft.Compute
 az provider register -n Microsoft.Compute
+
 # Wait for the feature to be registered and propagated
 start-Sleep -Seconds 30
 
@@ -519,14 +452,14 @@ Remove-Item -Path $tempFile.FullName
 # Allow the VM to settle
 Write-Host "Waiting for installations to complete..."
 Start-Sleep -Seconds 60
+```
 
-````
+### Create a Shared Image Gallery and Image Definition from the VM
 
-### Create a Shared Image Gallery and Image Definition
-
-````pwsh
+```pwsh
 $GALLERY_NAME = "galleryacaalbumapi$($RANDOM_SUFFIX)"
 write-host "Creating Shared Image Gallery $GALLERY_NAME in $RESOURCE_GROUP..."
+
 # Check if the gallery exists
 $galleryExists = $false
 try {
@@ -620,6 +553,8 @@ az sig image-version create `
     --replica-count 1
 ```
 
+### Clean up the temporary resources
+
 ```pwsh
 # Optional: Delete the temporary VM and managed image to save costs
 Write-Host "Cleaning up temporary resources..."
@@ -660,13 +595,6 @@ az image delete --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_MANAGED_IMA
 ### Create a VMSS to host the Azure DevOps agent
 
 ```pwsh
-# Create a VMSS to host the Azure DevOps agent
-$VMSS_NAME = "vmss-ado-agent-albumapi-$($RANDOM_SUFFIX)"
-$VMSS_ADMIN_USERNAME = "adoagentadmin"
-$VMSS_ADMIN_PASSWORD = GeneratePassword 18
-$VMSS_ADMIN_USERNAME_KV_SECRET_NAME = "$($VMSS_NAME)-admin-username"
-$VMSS_ADMIN_PASSWORD_KV_SECRET_NAME = "$($VMSS_NAME)-admin-password"
-
 # Create the VMSS with the managed image from the Shared Image Gallery
 az vmss create `
     --resource-group $RESOURCE_GROUP `
@@ -696,11 +624,17 @@ az keyvault secret set `
     --name $VMSS_ADMIN_PASSWORD_KV_SECRET_NAME `
     --value $VMSS_ADMIN_PASSWORD
 Write-Host "VMSS credentials stored in Key Vault $KV_NAME."
-
 ```
+
+### Create an ADO Agent pool and configure it to use the VMSS
+
+Follow instructions from Azure DevOps documentation:
+
+[Azure Virtual Machine Scale Set agents](https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/scale-set-agents?view=azure-devops)
+
 ### Create a Windows Jumpbox VM in the VNet to access the resources privately
 
-```pwsh```
+```pwsh
 # Create a Windows Jumpbox VM in the VNet
 # Generate the password for the Developer VM
 $JUMPBOX_ADMIN_PASSWORD = GeneratePassword 18
@@ -735,7 +669,7 @@ az keyvault secret set `
 Write-Host "Jumpbox VM credentials stored in Key Vault $KV_NAME."
 ```
 
-#### Login to the Jumpbox VM by using Azure Bastion
+### Login to the Jumpbox VM using Azure Bastion
 
 - In the Azure Portal, use `Connect via Bastion` to login the Jumpbox VM
 
@@ -753,7 +687,7 @@ Write-Host "Jumpbox VM credentials stored in Key Vault $KV_NAME."
 
   - Click `Connect`
 
-#### Using Azure Bastion with Remote Desktop Tunneling
+### Login using Azure Bastion Remote Desktop Tunneling
 
 ```pwsh
 $JUMPBOX_ID=$(az vm show --name $JUMPBOX_NAME --resource-group $RESOURCE_GROUP --query 'id' -o tsv)
@@ -761,7 +695,9 @@ $JUMPBOX_ID=$(az vm show --name $JUMPBOX_NAME --resource-group $RESOURCE_GROUP -
 az network bastion rdp --name $BASTION_NAME --resource-group $RESOURCE_GROUP --target-resource-id  $JUMPBOX_ID
 ```
 
-#### Install the required tools on the Jumpbox VM
+## Switch to the Jumpbox VM
+
+### Install required tools in the Jumpbox VM
 
 - Follow the Startup wizard (Next, Accept)
 
@@ -824,9 +760,7 @@ cd aca-full-private-app
 vscode .
 ```
 
-#### Lock existing resources and Deploy the Container App privately
-
-In the Jumpbox VM, open a PowerShell terminal and execute the following commands to deploy the Container App privately.
+### Set the Azure CLI context
 
 ```pwsh
 ####################   LOG IN TO THE JUMPBOX VM with Tools  ####################
@@ -861,7 +795,11 @@ $BUILD_IMAGE_TAG = "original"
 
 $ENVIRONMENT="aca-env-private-album-api"
 $API_NAME="aca-app-private-album-api"
+```
 
+### Lock the Key Vault and create its Private Endpoint
+
+```pwsh
 
 # 1. Update Key Vault to disable public network access
 az keyvault update `
@@ -892,9 +830,11 @@ $KV_FQDN="$($KV_NAME).vault.azure.net"
 # 5. Create the private DNS record
 az network private-dns record-set a create --name $KV_NAME --zone-name "privatelink.vaultcore.azure.net" --resource-group $RESOURCE_GROUP
 az network private-dns record-set a add-record --record-set-name $KV_NAME --zone-name "privatelink.vaultcore.azure.net" --resource-group $RESOURCE_GROUP --ipv4-address $KV_PRIVATE_IP
+```
 
+### Create a Container Registry and its Private endpoint
 
-# 6. Create a Private endpoint capable Container Registry
+```pwsh
 az acr create `
     --name $ACR_NAME `
     --resource-group $RESOURCE_GROUP `
@@ -929,14 +869,22 @@ az network private-dns record-set a create --name $ACR_NAME --zone-name "private
 az network private-dns record-set a create --name "$($ACR_NAME).$($LOCATION).data" --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP
 az network private-dns record-set a add-record --record-set-name $ACR_NAME --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP --ipv4-address $REGISTRY_PRIVATE_IP
 az network private-dns record-set a add-record --record-set-name "$($ACR_NAME).$($LOCATION).data" --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP --ipv4-address $DATA_ENDPOINT_PRIVATE_IP
+```
 
+### Cache the build images for the Applications
+
+```pwsh
 # 9. From Private VM, Build the container image and push it to the ACR
 az acr login -n $ACR_NAME
 
 # Pull into ACR the images used to build the App
-az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/sdk:6.0' -t 'mcr/dotnet/sdk:6.0'
-az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/aspnet:6.0' -t 'mcr/dotnet/aspnet:6.0'
+az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/sdk:8.0' -t 'mcr/dotnet/sdk:8.0'
+az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/aspnet:8.0' -t 'mcr/dotnet/aspnet:8.0'
+```
 
+### Build the App image and push it to the ACR
+
+```pwsh
 # Update Dockerfile with ACR name
 (Get-Content -Path "containerapps-albumapi-csharp\src\Dockerfile") -replace '<acr_name>', $ACR_NAME | Set-Content -Path "containerapps-albumapi-csharp\src\Dockerfile"
 
@@ -944,7 +892,11 @@ az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/aspnet:6.0' -t 'mc
 # $BUILD_IMAGE_TAG="emm-03"
 docker build -t "${ACR_NAME}.azurecr.io/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}" containerapps-albumapi-csharp/src
 docker push "${ACR_NAME}.azurecr.io/${BUILD_IMAGE_NAME}:${BUILD_IMAGE_TAG}"
+```
 
+### Create a Private Storage Account
+
+```pwsh
 # 10. Deploy the Container App Environment
 ## Create a Storage Account
 az storage account create `
@@ -974,13 +926,21 @@ $STORAGE_PRIVATE_IP=$(az network nic show --ids $STORAGE_PE_NIC_ID --query "ipCo
 
 az network private-dns record-set a create --name $STORAGE_ACCOUNT --zone-name "privatelink.blob.core.windows.net" --resource-group $RESOURCE_GROUP
 az network private-dns record-set a add-record --record-set-name $STORAGE_ACCOUNT --zone-name "privatelink.blob.core.windows.net" --resource-group $RESOURCE_GROUP --ipv4-address $STORAGE_PRIVATE_IP
+```
 
+### Create a Private Log Analytics Workspace
+
+```pwsh
 ## Create a Log Analytics Workspace
 az monitor log-analytics workspace create `
     --workspace-name $LOG_ANALYTICS_WORKSPACE `
     --resource-group $RESOURCE_GROUP `
     --location $LOCATION
+```
 
+### Create a Private Azure Container App Environment
+
+```pwsh
 ## Get the Log Analytics Client ID and Client Secret + App Environment ID
 $LOG_ANALYTICS_WORKSPACE_CLIENT_ID=az monitor log-analytics workspace show --resource-group $RESOURCE_GROUP --workspace-name $LOG_ANALYTICS_WORKSPACE --query customerId -o tsv
 $LOG_ANALYTICS_WORKSPACE_CLIENT_SECRET=az monitor log-analytics workspace get-shared-keys --resource-group $RESOURCE_GROUP --workspace-name $LOG_ANALYTICS_WORKSPACE --query primarySharedKey -o tsv
@@ -1027,8 +987,11 @@ $ACA_ENV_PRIVATE_IP=$(az network nic show --ids $ACA_PE_NIC_ID --query "ipConfig
 # The Container App Environment DNS record needs to be a wildcard to support all apps
 az network private-dns record-set a create --name "*" --zone-name "privatelink.${LOCATION}.azurecontainerapps.io" --resource-group $RESOURCE_GROUP
 az network private-dns record-set a add-record --record-set-name "*" --zone-name "privatelink.${LOCATION}.azurecontainerapps.io" --resource-group $RESOURCE_GROUP --ipv4-address $ACA_ENV_PRIVATE_IP
+```
 
+### Create and deploy the Container App WebAPI
 
+```pwsh
 # 11. Create and deploy the Container App WebAPI
 ## Get the ACR login server
 $ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP --query loginServer -o tsv)
@@ -1046,9 +1009,9 @@ az containerapp create `
     --registry-server $ACR_LOGIN_SERVER `
     --registry-identity 'system' `
     --query properties.configuration.ingress.fqdn
+```
 
-
-# 12. Create and deploy an API Management instance (Standard v2)
+<!-- # 12. Create and deploy an API Management instance (Standard v2)
 
 $APIM_NAME = "apim-aca-albumapi-$($RANDOM_SUFFIX)"
 az apim create `
@@ -1061,5 +1024,4 @@ az apim create `
   --sku-name StandardV2 `
   --virtual-network Internal
 
-```
-
+``` -->
