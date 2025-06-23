@@ -16,7 +16,7 @@ Both sample apps are coming from [Build and deploy from local source code to Azu
 
 The following code in this README contains the Azure CLI commands to deploy all the Azure resources required, and appropriately configured to run the applications in a full Private Azure Container Apps successfully
 
-It mainly covers the following resources:
+It deploys:
 
 - Resource Group
 - Virtual Network
@@ -25,12 +25,11 @@ It mainly covers the following resources:
 - Azure Bastion
 - Azure Virtual Machine, used as a Jumpbox - since networking and data planes are private
 - Azure Key Vault
-- Azure Shared Image Gallery with a templating VM build steps
-- Azure Virtual Machine Scale Set (VMSS), used as Azure DevOps self-hosted agents
+- Azure Virtual Machine to create a Shared Image Gallery
+- Azure Virtual Machine Scale Set (VMSS), used as Azure DevOps self-hosted agents, leveraging the Shared Image Gallery
 - Azure Container Registry
 - Azure Storage Account
 - Log Analytics Workspace
-- Application Insights
 - Azure Container Apps Environment
 - Azure Container App
 
@@ -39,7 +38,7 @@ To use the Azure DevOps Pipelines, an Azure DevOps organization and project is r
 ## **Important remark**
 
 - This deployment **is NOT following the Microsoft recommended architecture** to deploy Azure Landing Zones and follow Azure Cloud Adoption Framework. It is meant to reproduce an actual customer scenario, which current Azure adoption practices do not follow fully Microsoft's recommendations.
-- Some of the key items missing in the following deployment are:
+- Some of the key items missing in this deployment are:
   - Azure Enterprise Platform Landing Zone in 3 subscriptions: Identity, Network, and Management,
   - Planned management practices, such as Azure Policy, and Azure Monitor,
   - DNS resolution planning and implementation between on-premises and Azure,
@@ -48,12 +47,14 @@ To use the Azure DevOps Pipelines, an Azure DevOps organization and project is r
   - etc.
 - The official documentation for Azure Enterprise Platform Landing Zone is available here: [Azure Enterprise-Scale landing zone architecture](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/enterprise-scale/architecture).
 
+- **DO NOT USE THIS AS A PRODUCTION EXAMPLE**, it is meant to be a quickstart to deploy a private Azure Container App with a sample application, demonstrating the related resources and their configuration for the private access purpose.
+
 ## How to deploy
 
 There are 2 files to use to deploy:
 
-1. the content following in this file: allows to deploy, using Azure CLI (PowerShell flavored),
-2. the file `aca-deploy-public.md` that deploys the same application, but with public access, using `az containerapp up` command, as a "Public" example.
+1. The content following in this file: allows to deploy, using Azure CLI (PowerShell flavored),
+2. The file `aca-deploy-public.md` that deploys the same application, but with public access, using `az containerapp up` command, as a "Public" example.
 
 ## Full Private deployment steps
 
@@ -71,7 +72,7 @@ az provider register --namespace Microsoft.OperationalInsights
 
 ```pwsh
 #----FUNCTIONS----
-## Generate admin password and store it in Key vault
+## Generates an admin password
 function GeneratePassword {
     param(
         [ValidateRange(12, 256)]
@@ -150,7 +151,7 @@ Write-Host "My Public IP: $MY_PUBLIC_IP"
 #----END VARIABLES----
 ```
 
-### Login to Azure and create the Resource Group
+### Login to Azure and create a Resource Group
 
 ```pwsh
 #Login to Azure
@@ -175,7 +176,7 @@ if (az group exists --name $RESOURCE_GROUP) {
 az group create --name $RESOURCE_GROUP --location $LOCATION
 ```
 
-### Create the Virtual Network and Subnets
+### Create a Virtual Network and Subnets
 
 ```pwsh
 # Create a Virtual Network and Subnets
@@ -871,7 +872,7 @@ az network private-dns record-set a add-record --record-set-name $ACR_NAME --zon
 az network private-dns record-set a add-record --record-set-name "$($ACR_NAME).$($LOCATION).data" --zone-name "privatelink.azurecr.io" --resource-group $RESOURCE_GROUP --ipv4-address $DATA_ENDPOINT_PRIVATE_IP
 ```
 
-### Cache the build images for the Applications
+### Cache the Docker images used to build the Application
 
 ```pwsh
 # 9. From Private VM, Build the container image and push it to the ACR
@@ -882,7 +883,7 @@ az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/sdk:8.0' -t 'mcr/d
 az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/aspnet:8.0' -t 'mcr/dotnet/aspnet:8.0'
 ```
 
-### Build the App image and push it to the ACR
+### Build the Applicatio image and push it to the ACR
 
 ```pwsh
 # Update Dockerfile with ACR name
@@ -989,7 +990,7 @@ az network private-dns record-set a create --name "*" --zone-name "privatelink.$
 az network private-dns record-set a add-record --record-set-name "*" --zone-name "privatelink.${LOCATION}.azurecontainerapps.io" --resource-group $RESOURCE_GROUP --ipv4-address $ACA_ENV_PRIVATE_IP
 ```
 
-### Create and deploy the Container App WebAPI
+### Create and deploy a Container App for the WebAPI
 
 ```pwsh
 # 11. Create and deploy the Container App WebAPI
