@@ -1,0 +1,86 @@
+# Build and push Docker image for Album API
+
+# trigger:
+# - main
+
+resources:
+- repo: self
+
+variables:
+- group: Album_Api_Build
+- group: Album_Api_ACA
+- name: imageRepository
+  value: 'eb-apps/album-api'
+- name: containerRegistry
+  value: '$(ACR_NAME).azurecr.io'
+- name: sourcePath
+  value: 'containerapps-albumapi-csharp/src'
+- name: dockerfilePath
+  value: '$(Build.SourcesDirectory)/$(sourcePath)/Dockerfile'
+
+stages:
+- stage: Build
+  displayName: Build and push stage
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      name: $(PRIVATE_AGENT_POOL_NAME)
+    steps:
+    - task: Bash@3
+      displayName: Dockerfile token replace
+      inputs:
+        targetType: 'inline'
+        script: |
+          # We replace the ACR placeholder in Dockerfile with the actual ACR value to use
+          # ACR name to use
+          ACR_NAME=$(ACR_NAME)
+          # File to update
+          DOCKERFILE=$(dockerfilePath)
+          # Check if Dockerfile exists
+          if [ ! -f "$DOCKERFILE" ]; then
+              echo "Error: Dockerfile not found in current directory."
+              exit 1
+          fi
+          # Replace <acr_name> with the actual ACR name
+          sed -i "s/<acr_name>/${ACR_NAME}/g" "$DOCKERFILE"
+          # Verify the replacement
+          if grep -q "<acr_name>" "$DOCKERFILE"; then
+              echo "Error: Not all placeholders were replaced. Please check the Dockerfile."
+              exit 1
+          else
+              echo "Success: All <acr_name> placeholders in Dockerfile have been replaced with ${ACR_NAME}."
+              echo "Updated Dockerfile content:"
+              cat "$DOCKERFILE"
+          fi
+    - task: AzureCLI@2
+      displayName: Image Build and Push to ACR
+      inputs:
+        azureSubscription: 'ME-MngEnvMCAP391575-emberger-4(b8e2cc57-9620-431e-9293-4318e720ba07)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+            echo
+            echo "==========================================================================="
+            echo "ACR Name: $(ACR_NAME)"
+            echo "Logging in to ACR $(ACR_NAME)"
+            az acr login -n $(ACR_NAME)
+            echo
+            echo "==========================================================================="
+            echo "Building Docker image: $(containerRegistry)/$(imageRepository):$(Build.BuildId)"
+            docker build -t "$(containerRegistry)/$(imageRepository):$(Build.BuildId)" $(sourcePath)
+            echo
+            echo "==========================================================================="
+            echo "Pushing image $(containerRegistry)/$(imageRepository):$(Build.BuildId) to ACR"
+            docker push "$(containerRegistry)/$(imageRepository):$(Build.BuildId)"
+    - task: AzureCLI@2
+      displayName: Create Container App revision with new image
+      inputs:
+        azureSubscription: 'ME-MngEnvMCAP391575-emberger-4(b8e2cc57-9620-431e-9293-4318e720ba07)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+            echo
+            echo "==========================================================================="
+            echo "Creating new revision of Azure Container App $(CONTAINER_APP_NAME) by revision copy, with image $(containerRegistry)/$(imageRepository):$(Build.BuildId)"
+            az containerapp revision copy -n $(CONTAINER_APP_NAME) -g $(CONTAINER_APP_RG) --image "$(containerRegistry)/$(imageRepository):$(Build.BuildId)"

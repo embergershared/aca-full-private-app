@@ -331,7 +331,6 @@ az network bastion create `
   --enable-tunneling true
 
 # Create and link the required Private DNS Zones on the VNet
-
 # Define global (non-region-specific) private DNS zones
 $globalZones = @(
     "privatelink.blob.core.windows.net",

@@ -1,0 +1,267 @@
+#cloud-config
+# Documentation: https://cloudinit.readthedocs.io/en/latest/
+# Examples: https://cloudinit.readthedocs.io/en/latest/topics/examples.html
+# Default Log: cat /var/log/cloud-init-output.log
+package_update: true
+package_upgrade: true
+packages:
+  - zip
+  - apt-transport-https
+  - ca-certificates
+  - gnupg-agent
+  - software-properties-common
+  - awscli
+
+# write_files:
+  # - content: |
+  #     #!/bin/bash -e
+  #     ################################################################################
+  #     ##  File:  install.sh
+  #     ##  Desc:  Helper functions for installing tools
+  #     ################################################################################
+  #   path: /cloudinit-install/scripts/rdpsetup.sh
+  #   permissions: '0755'
+
+runcmd:
+  #
+  # Enter sudo user
+  #
+  - sudo -s
+
+  #
+  # Create Control Folder under root directory
+  #
+  - mkdir /cloudinit-install
+  - cd /cloudinit-install
+  - mkdir /cloudinit-install/downloads
+  - touch /cloudinit-install/cloudinit_started.txt
+  - echo "[$(date +%F_%T)] Started cloudinit.yaml by creating /cloudinit_started.txt file" >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  #
+  # Update and Clean the OS
+  #
+  - echo "[$(date +%F_%T)] Updating apt packages" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - apt update && apt upgrade -y
+  # in case of locks, use this: - until sudo apt-get -y install unzip; do sleep 5; done
+  - echo "[$(date +%F_%T)] Removing old apt packages" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - apt autoremove -y
+
+  #
+  # Set TimeZone to New York
+  #
+  - echo "[$(date +%F_%T)] Setting TimeZone to New York" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - timedatectl set-timezone America/New_York
+
+  #
+  # Starting installations
+  #
+  - echo "[$(date +%F_%T)] Starting installations" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - cd /cloudinit-install/downloads
+
+  #
+  # Install curl, wget, unzip, jq
+  #
+  - echo "[$(date +%F_%T)] Installing curl, wget, unzip, jq" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - apt install curl -y
+  - apt install wget -y
+  - apt install unzip -y
+  - apt install jq -y
+
+  #
+  # Install Azure CLI Deb
+  #
+  - echo "[$(date +%F_%T)] Installing Azure CLI" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+  - echo "[$(date +%F_%T)] Displaying Azure CLI version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - az version >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  #
+  # Install Docker
+  #
+  - echo "[$(date +%F_%T)] Installing Docker" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - apt install docker.io -y
+  - echo "[$(date +%F_%T)] Displaying Docker version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - docker version >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  #
+  # Install .NET SDK 8.0
+  #
+  - echo "[$(date +%F_%T)] Installing .NET SDK" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - apt install dotnet-sdk-8.0 -y
+  - echo "[$(date +%F_%T)] Displaying .NET SDK version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - dotnet --version >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  #
+  # Install packer
+  #
+  - echo "[$(date +%F_%T)] Installing packer" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - URL=$(curl -fsSL https://api.releases.hashicorp.com/v1/releases/packer/latest | jq -r '.builds[] | select((.arch=="amd64") and (.os=="linux")).url')
+  - wget $URL
+  - unzip -qq packer*.zip -d /usr/local/bin
+  - rm -f packer*.zip
+  - echo "[$(date +%F_%T)] Displaying packer version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - packer version >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  #
+  # Install Terraform
+  #
+  - echo "[$(date +%F_%T)] Installing Terraform" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - URL=$(curl -fsSL https://api.releases.hashicorp.com/v1/releases/terraform/latest | jq -r '.builds[] | select((.arch=="amd64") and (.os=="linux")).url')
+  - wget $URL
+  - unzip -qq terraform*.zip -d /usr/local/bin
+  - rm -f terraform*.zip
+  - echo "[$(date +%F_%T)] Displaying terraform version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - terraform version >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  # 
+  # Install Helm
+  # 
+  - echo "[$(date +%F_%T)] Installing Helm" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - curl -fsSL https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+  - echo "[$(date +%F_%T)] Displaying helm version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - helm version >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  # 
+  # Install Kubectl CLI
+  # 
+  - echo "[$(date +%F_%T)] Installing Kubectl CLI" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - az aks install-cli | bash
+  - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+  - install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+  - echo "[$(date +%F_%T)] Displaying kubectl version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - kubectl version --client >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  # #
+  # # Install PowerShell
+  # # 
+  # - echo "[$(date +%F_%T)] Installing PowerShell" >> /cloudinit-install/cloudinit-ado-vmss.log
+  # - wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb
+  # - dpkg -i packages-microsoft-prod.deb
+  # - apt-get update
+  # - add-apt-repository universe
+  # - apt-get install -y powershell
+  # - echo "[$(date +%F_%T)] Displaying powershell version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  # - pwsh --version >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  #
+  # Install Bicep
+  #
+  - echo "[$(date +%F_%T)] Installing Bicep" >> /cloudinit-install/cloudinit-ado-vmss.log
+  # - sudo az bicep install
+  - wget https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+  - chmod +x ./bicep-linux-x64
+  - mv ./bicep-linux-x64 /usr/local/bin/bicep
+  - az bicep install
+  - echo "[$(date +%F_%T)] Displaying bicep version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - az bicep version >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  # #
+  # # Install Python3
+  # #
+  # - echo "[$(date +%F_%T)] Installing Python" >> /cloudinit-install/cloudinit-ado-vmss.log
+  # - apt-get install -y --no-install-recommends python3 python3-dev python3-pip python3-venv
+  # - echo "[$(date +%F_%T)] Displaying Python version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  # - python3 --version >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  #
+  # Downloading helpers scripts from actions/runner-images
+  #
+  - echo "[$(date +%F_%T)] Downloading helpers scripts from actions/runner-images" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - mkdir -p /cloudinit-install/helpers
+  - cd /cloudinit-install/helpers
+  - wget https://raw.githubusercontent.com/actions/runner-images/main/images/linux/scripts/helpers/install.sh
+  - wget https://raw.githubusercontent.com/actions/runner-images/main/images/linux/scripts/helpers/etc-environment.sh
+  - wget https://raw.githubusercontent.com/actions/runner-images/main/images/linux/scripts/helpers/os.sh
+  - chmod +x ./install.sh
+  - chmod +x ./etc-environment.sh
+  - chmod +x ./os.sh
+  - echo "[$(date +%F_%T)] Displaying helpers scripts from actions/runner-images" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - ls -l /cloudinit-install/helpers >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  #
+  # Downloading install scripts from actions/runner-images (python, docker)
+  #
+  - echo "[$(date +%F_%T)] Downloading install scripts from actions/runner-images (python, docker)" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - mkdir -p /cloudinit-install/scripts
+  - cd /cloudinit-install/scripts
+  # python.sh
+  - echo "[$(date +%F_%T)]    python.sh" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - wget https://raw.githubusercontent.com/actions/runner-images/main/images/linux/scripts/installers/python.sh
+  - # Remove tests
+  - sed -i '/invoke_tests/d' python.sh
+  - # Replace $HELPER_SCRIPTS variable
+  - var1='$HELPER_SCRIPTS'
+  - var2="/cloudinit-install/helpers"
+  - sed -i -e "s+$var1+$var2+g" python.sh
+  - # Set python.sh executable
+  - chmod +x ./python.sh
+  - # docker.sh
+  - echo "[$(date +%F_%T)]    docker.sh" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - wget https://raw.githubusercontent.com/actions/runner-images/main/images/linux/scripts/installers/docker.sh
+  - # Remove tests
+  - sed -i '75,78d' docker.sh
+  - # Remove aws-ecr-credentials
+  - sed -i '65,69d' docker.sh
+  - # Remove docker images pull
+  - sed -i '44,63d' docker.sh
+  - # Replace $HELPER_SCRIPTS variable
+  - var1='$HELPER_SCRIPTS'
+  - var2="/cloudinit-install/helpers"
+  - sed -i -e "s+$var1+$var2+g" docker.sh
+  - # Set docker.sh executable
+  - chmod +x ./docker.sh
+  - echo "[$(date +%F_%T)] Displaying install scripts from actions/runner-images" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - ls -l /cloudinit-install/scripts >> /cloudinit-install/cloudinit-ado-vmss.log
+  - # Other simple install is: sudo snap install docker
+
+  #
+  # Installing python + pipx with install scripts from actions/runner-images
+  #
+  - echo "[$(date +%F_%T)] Installing python + pipx with install scripts from actions/runner-images" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - ./python.sh
+  - echo "[$(date +%F_%T)] Displaying python3 version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - python3 --version >> /cloudinit-install/cloudinit-ado-vmss.log
+  - echo "[$(date +%F_%T)] Displaying pipx version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - pipx --version >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  #
+  # Installing docker with install scripts from actions/runner-images
+  #
+  - echo "[$(date +%F_%T)] Installing docker with install scripts from actions/runner-images" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - ./docker.sh
+  - echo "[$(date +%F_%T)] Displaying docker version" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - docker version >> /cloudinit-install/cloudinit-ado-vmss.log
+
+  #
+  # Install Android
+  #
+
+  #
+  # Tuning docker permissions as sudo
+  #
+  - echo "[$(date +%F_%T)] Tuning docker permissions" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - groupadd docker
+  - usermod -aG docker $(whoami)
+  - usermod -aG docker AzDevOps
+  - chmod 777 /var/run/docker.sock
+
+  #
+  # Logout from sudo -s context
+  #
+  - echo "[$(date +%F_%T)] Logout from sudo -s" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - exit
+
+  #
+  # Tuning docker permissions out of sudo
+  #
+  - sudo echo "[$(date +%F_%T)] Tuning docker permissions" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - sudo groupadd docker
+  - sudo usermod -aG docker $(whoami)
+  - sudo usermod -aG docker AzDevOps
+  - sudo chmod 777 /var/run/docker.sock
+
+  #
+  # Set the cloudinit finished file so the custom script extension can stop the timer
+  #
+  - sudo echo "[$(date +%F_%T)] Finishing cloudinit.yaml by creating /cloudinit_finished.txt file" >> /cloudinit-install/cloudinit-ado-vmss.log
+  - sudo touch /cloudinit-install/cloudinit_finished.txt
