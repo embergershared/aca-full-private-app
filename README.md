@@ -72,6 +72,73 @@ az provider register --namespace Microsoft.OperationalInsights
 
 ```pwsh
 #----FUNCTIONS----
+function AddLog ($message) {
+  #Add-Content -Path $filePath -Value "$(Get-Date): $message"
+  Write-Host "$(Get-Date): $message"
+}
+function TrimAndRemoveTrailingHyphens {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$inputString,
+        
+    [Parameter(Mandatory = $true)]
+    [ValidateRange(1, [int]::MaxValue)]
+    [int]$maxLength,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Randomize
+  )
+
+  # First trim the string to the maximum length, leaving room for random numbers if needed
+  $effectiveMaxLength = if ($Randomize) { $maxLength - 4 } else { $maxLength }
+  $trimmedString = $inputString.Substring(0, [System.Math]::Min($effectiveMaxLength, $inputString.Length))
+    
+  # Remove any trailing hyphens
+  $trimmedString = $trimmedString.TrimEnd('-')
+    
+  # Remove any leading hyphens
+  $trimmedString = $trimmedString.TrimStart('-')
+
+  # Add random numbers if specified
+  if ($Randomize) {
+    $randomNum = -join ((Get-Random -Minimum 111 -Maximum 999).ToString())
+    $trimmedString = "${trimmedString}-${randomNum}"
+  }
+    
+  return $trimmedString
+}
+function CreatePrivateEndpoint {
+  param(
+    [string]$name,
+    [string]$resourceId,
+    [string]$groupId,
+    [string]$dnsZoneName,
+    [string]$rgName,
+    [string]$vnetName,
+    [string]$subnetName
+  )
+
+  # Create private endpoint
+  az network private-endpoint create `
+    --name "$name-pe" `
+    --resource-group $rgName `
+    --vnet-name $vnetName `
+    --subnet $subnetName `
+    --private-connection-resource-id $resourceId `
+    --group-id $groupId `
+    --connection-name "$name-pe-conn" `
+    --nic-name "$name-pe-nic"
+
+  # Create DNS zone group for automatic DNS registration
+  az network private-endpoint dns-zone-group create `
+    --name "pe-dns-zone-group" `
+    --resource-group $rgName `
+    --endpoint-name "$name-pe" `
+    --private-dns-zone $dnsZoneName `
+    --zone-name default
+    
+  AddLog "Private endpoint created: $name"
+}
 ## Generates an admin password
 function GeneratePassword {
     param(
@@ -103,7 +170,7 @@ function GeneratePassword {
 $RANDOM_SUFFIX = $(Get-Random -Minimum 100 -Maximum 999)
 
 $RESOURCE_GROUP="rg-aca-quickstart-album-api-$($RANDOM_SUFFIX)"
-$LOCATION="eastus2"
+$LOCATION="southcentralus"
 
 $VNET_NAME = "vnet-aca-albumapi-$($RANDOM_SUFFIX)"
 $WKLD_SUBNET_NAME = "wkld-snet"
@@ -116,6 +183,11 @@ $ACR_NAME = "acracaalbumapi$($RANDOM_SUFFIX)"
 $LOG_ANALYTICS_WORKSPACE="law-aca-albumapi-$($RANDOM_SUFFIX)"
 $STORAGE_ACCOUNT="stacaalbumapi$($RANDOM_SUFFIX)"
 $KV_NAME = "kv-aca-albumapi-$($RANDOM_SUFFIX)"
+$APP_INS_NAME = TrimAndRemoveTrailingHyphens -inputString "appi-aca-albumapi${RANDOM_SUFFIX}" -maxLength 260
+
+$AML_WS_NAME = TrimAndRemoveTrailingHyphens -inputString "amlws-aca-albumapi${RANDOM_SUFFIX}" -maxLength 24
+
+$DOCINT_NAME = TrimAndRemoveTrailingHyphens -inputString "docint-aca-albumapi-${RANDOM_SUFFIX}" -maxLength 32
 
 $JUMPBOX_NAME="vm-win-albumapi-$($RANDOM_SUFFIX)"
 $JUMPBOX_ADMIN_USERNAME="acaadmin"
@@ -218,6 +290,12 @@ if (-not (az network vnet show --name $VNET_NAME --resource-group $RESOURCE_GROU
     --resource-group $RESOURCE_GROUP `
     --vnet-name $VNET_NAME
 }
+
+# Generate all the IDs variables
+$VNET_ID = $(az network vnet show --resource-group $RESOURCE_GROUP --name $VNET_NAME --query id -o tsv)
+
+$WKLD_SUBNET_ID = $(az network vnet subnet show --resource-group $RESOURCE_GROUP --vnet-name $VNET_NAME --name $WKLD_SUBNET_NAME --query id -o tsv)
+
 ```
 
 ### Create Azure Bastion Host
@@ -289,15 +367,18 @@ $globalZones = @(
     "privatelink.batch.azure.com",
     "privatelink.search.windows.net",
     "privatelink.siterecovery.windowsazure.com",
-    "privatelink.azurearcdata.com"
+    "privatelink.azurearcdata.com",
+    "privatelink.cognitiveservices.azure.com",
+    "privatelink.notebooks.azure.net",
+    "privatelink.api.azureml.ms"
 )
 
 # Define region-specific zones
 $regionSpecificZones = @(
-    "privatelink.$location.azurecontainerapps.io",
-    "privatelink.$location.azmk8s.io",
-    "privatelink.$location.applicationinsights.azure.com",
-    "privatelink.$location.datafactory.azure.net"
+    "privatelink.$LOCATION.azurecontainerapps.io",
+    "privatelink.$LOCATION.azmk8s.io",
+    "privatelink.$LOCATION.applicationinsights.azure.com",
+    "privatelink.$LOCATION.datafactory.azure.net"
 )
 
 # Combine all zones
@@ -904,7 +985,7 @@ az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/sdk:8.0' -t 'mcr/d
 az acr import -n $ACR_NAME --source 'mcr.microsoft.com/dotnet/aspnet:8.0' -t 'mcr/dotnet/aspnet:8.0'
 ```
 
-### Build the Applicatio image and push it to the ACR
+### Build the Application image and push it to the ACR
 
 ```pwsh
 # Update Dockerfile with ACR name
@@ -950,14 +1031,35 @@ az network private-dns record-set a create --name $STORAGE_ACCOUNT --zone-name "
 az network private-dns record-set a add-record --record-set-name $STORAGE_ACCOUNT --zone-name "privatelink.blob.core.windows.net" --resource-group $RESOURCE_GROUP --ipv4-address $STORAGE_PRIVATE_IP
 ```
 
-### Create a Private Log Analytics Workspace
+### Create a Log Analytics Workspace
 
 ```pwsh
 ## Create a Log Analytics Workspace
 az monitor log-analytics workspace create `
-    --workspace-name $LOG_ANALYTICS_WORKSPACE `
-    --resource-group $RESOURCE_GROUP `
-    --location $LOCATION
+  --name $LOG_ANALYTICS_WORKSPACE `
+  --resource-group $RESOURCE_GROUP `
+  --sku "PerGB2018" `
+  --location $LOCATION
+
+$LAW_ID = $(az monitor log-analytics workspace show --resource-group $RESOURCE_GROUP --workspace-name $LOG_ANALYTICS_WORKSPACE --query id -o tsv)
+$LAW_CLIENT_ID = $(az monitor log-analytics workspace show --resource-group $RESOURCE_GROUP --workspace-name $LOG_ANALYTICS_WORKSPACE --query customerId -o tsv)
+$LAW_CLIENT_KEY = $(az monitor log-analytics workspace get-shared-keys --resource-group $RESOURCE_GROUP --workspace-name $LOG_ANALYTICS_WORKSPACE --query primarySharedKey -o tsv)
+AddLog "Log Analytics Workspace created: $LOG_ANALYTICS_WORKSPACE"
+```
+
+### Create a App Insights instance
+
+```pwsh
+az monitor app-insights component create `
+  --app $APP_INS_NAME `
+  --resource-group $RESOURCE_GROUP `
+  --location $LOCATION `
+  --kind web `
+  --application-type web `
+  --workspace $LAW_ID
+
+$APP_INS_ID = $(az monitor app-insights component show --app $APP_INS_NAME --resource-group $RESOURCE_GROUP --query id -o tsv)
+AddLog "Application Insights created: $APP_INS_NAME"
 ```
 
 ### Create a Private Azure Container App Environment
@@ -1047,3 +1149,141 @@ az apim create `
   --virtual-network Internal
 
 ``` -->
+
+### Create a Private Azure Machine Learning Workspace
+
+```pwsh
+# 15. Create Azure Machine Learning Workspace
+az extension add -n ml # az extension update -n ml
+
+# Create the workspace using Azure CLI
+az ml workspace create `
+  -g $RESOURCE_GROUP `
+  --name $AML_WS_NAME `
+  --description "Private Azure Machine Learning Workspace" `
+  --location $LOCATION `
+  --storage-account $STORAGE_ID `
+  --key-vault $KV_ID `
+  --application-insights $APP_INS_ID `
+  --container-registry $ACR_ID `
+  --public-network-access Disabled `
+  --system-datastores-auth-mode identity `
+  --managed-network 'allow_only_approved_outbound'
+
+$AML_WS_ID = $(az ml workspace show --name $AML_WS_NAME --resource-group $RESOURCE_GROUP --query id -o tsv)
+AddLog "Azure Machine Learning Workspace created: $AML_WS_NAME"
+
+# Create the Private Endpoint for the Azure Machine Learning Workspace
+az network private-endpoint create `
+  --name "$AML_WS_NAME-pe" `
+  --resource-group $RESOURCE_GROUP `
+  --vnet-name $VNET_NAME `
+  --subnet $WKLD_SUBNET_NAME `
+  --private-connection-resource-id $AML_WS_ID `
+  --group-id 'amlworkspace' `
+  --connection-name "$AML_WS_NAME-pe-conn" `
+  --nic-name "$AML_WS_NAME-pe-nic"
+
+az network private-endpoint dns-zone-group create `
+  -g $RESOURCE_GROUP `
+  --endpoint-name "$AML_WS_NAME-pe" `
+  --name 'zone-group' `
+  --private-dns-zone 'privatelink.api.azureml.ms' `
+  --zone-name 'privatelink.api.azureml.ms'
+
+az network private-endpoint dns-zone-group add `
+  -g $RESOURCE_GROUP `
+  --endpoint-name "$AML_WS_NAME-pe" `
+  --name 'zone-group' `
+  --private-dns-zone 'privatelink.notebooks.azure.net' `
+  --zone-name 'privatelink.notebooks.azure.net'
+
+
+# Create required User-assigned managed identity for Private Compute instances
+$AML_UAI_NAME = "$AML_WS_NAME-uai"
+az identity create --name $AML_UAI_NAME --resource-group $RESOURCE_GROUP --location $LOCATION
+
+$AML_UAI_PRINCIPAL_ID = $(az identity show --name $AML_UAI_NAME --resource-group $RESOURCE_GROUP --query principalId -o tsv)
+AddLog "User-assigned managed identity created: $AML_UAI_NAME"
+
+
+# Assign required roles to the User-assigned managed identity
+# Ref: https://learn.microsoft.com/en-us/azure/machine-learning/how-to-disable-local-auth-storage?view=azureml-api-2&tabs=portal#scenarios-for-role-assignments
+
+# Grant the user-assigned managed identity Reader access to the resource group
+az role assignment create `
+  --assignee-object-id $AML_UAI_PRINCIPAL_ID `
+  --role "Storage Blob Data Contributor" `
+  --scope $STORAGE_ID
+
+az role assignment create `
+  --assignee-object-id $AML_UAI_PRINCIPAL_ID `
+  --role "Storage File Data Privileged Contributor" `
+  --scope $STORAGE_ID
+AddLog "Role Assignments created for Azure ML Studio User-assigned managed identity: $AML_UAI_NAME"
+```
+
+### Create a Private Document Intelligence Workspace
+
+```pwsh
+# Create Document Intelligence service with private networking
+az cognitiveservices account create `
+  --name $DOCINT_NAME `
+  --resource-group $RESOURCE_GROUP `
+  --location $LOCATION `
+  --kind "FormRecognizer" `
+  --sku "S0" `
+  --custom-domain $DOCINT_NAME
+
+# Get the resource ID for the Document Intelligence service
+$DOC_INT_ID = $(az cognitiveservices account show `
+    --name $DOCINT_NAME `
+    --resource-group $RESOURCE_GROUP `
+    --query id -o tsv)
+
+# Create a System Managed Identity
+az cognitiveservices account identity assign `
+  --name $DOCINT_NAME `
+  --resource-group $RESOURCE_GROUP
+
+# Disable All networks access
+az resource update `
+  --ids $DOC_INT_ID `
+  --set properties.networkAcls="{'defaultAction':'Deny'}"
+
+az resource update `
+  --ids $DOC_INT_ID `
+  --set properties.publicNetworkAccess='Disabled'
+
+# Create private endpoint
+az network private-endpoint create `
+  --name "$DOCINT_NAME-pe" `
+  --resource-group $RESOURCE_GROUP `
+  --vnet-name $VNET_NAME `
+  --subnet $WKLD_SUBNET_NAME `
+  --private-connection-resource-id $DOC_INT_ID `
+  --group-id "account" `
+  --connection-name "$DOCINT_NAME-pe-conn" `
+  --nic-name "$DOCINT_NAME-pe-nic"
+
+# Create private DNS zone for Document Intelligence
+az network private-dns zone create `
+  --resource-group $RESOURCE_GROUP `
+  --name "privatelink.cognitiveservices.azure.com"
+
+# Link private DNS zone to VNET
+az network private-dns link vnet create `
+  --resource-group $RESOURCE_GROUP `
+  --name "vnet-link" `
+  --zone-name "privatelink.cognitiveservices.azure.com" `
+  --virtual-network $VNET_NAME `
+  --registration-enabled false
+
+# Create DNS zone group for Document Intelligence private endpoint
+az network private-endpoint dns-zone-group create `
+  --name "docint-dns-zone-group" `
+  --resource-group $RESOURCE_GROUP `
+  --endpoint-name "$DOCINT_NAME-pe" `
+  --private-dns-zone "privatelink.cognitiveservices.azure.com" `
+  --zone-name default
+```
