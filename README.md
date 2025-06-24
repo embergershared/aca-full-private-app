@@ -79,7 +79,7 @@ function GeneratePassword {
         [int]$length = 14
     )
 
-     $symbols = '@-_*()^$#!{}[]|\~'.ToCharArray()
+    $symbols = '-_*()^$#!{}[]\~'.ToCharArray()
     $characterList = @(97..122 + 65..90 + 48..57 | ForEach-Object { [char]$_ }) + $symbols
 
     do {
@@ -129,7 +129,7 @@ $BUILD_AGENT_VM_ADMIN_PASSWORD = GeneratePassword 18
 $BUILD_AGENT_ADMIN_USERNAME_KV_SECRET_NAME = "$($BUILD_AGENT_VM_NAME)-admin-username"
 $BUILD_AGENT_ADMIN_PASSWORD_KV_SECRET_NAME="$($BUILD_AGENT_VM_NAME)-admin-password"
 $BUILD_AGENT_MANAGED_IMAGE_NAME = "mi-ubuntu-ado-agent"
-$BUILD_AGENT_IMAGE_VERSION_NAME = "1.0.0"
+$BUILD_AGENT_IMAGE_VERSION_NAME = "2.0.0"
 
 # VMSS ADO agent variables
 $VMSS_NAME = "vmss-ado-agent-albumapi-$($RANDOM_SUFFIX)"
@@ -168,7 +168,7 @@ if (-not $LOCATION) {
 }
 
 # Create the Resource Group
-if (az group exists --name $RESOURCE_GROUP) {
+if (-not(az group show --name $RESOURCE_GROUP)) {
     Write-Host "Resource Group $RESOURCE_GROUP already exists. Skipping creation."
 } else {
     Write-Host "Creating Resource Group $RESOURCE_GROUP in $LOCATION..."
@@ -181,7 +181,7 @@ az group create --name $RESOURCE_GROUP --location $LOCATION
 ```pwsh
 # Create a Virtual Network and Subnets
 # Ref: To use a VNet with Container Apps, the VNet must have a dedicated subnet with a CIDR range of /23 or larger when using the Consumption only environemnt, or a CIDR range of /27 or larger when using the workload profiles environment (https://learn.microsoft.com/en-us/azure/container-apps/vnet-custom?tabs=bash&pivots=azure-portal#create-a-virtual-network)
-if (az network vnet exists --name $VNET_NAME --resource-group $RESOURCE_GROUP) {
+if (-not (az network vnet show --name $VNET_NAME --resource-group $RESOURCE_GROUP)) {
     Write-Host "Virtual Network $VNET_NAME already exists in $RESOURCE_GROUP. Skipping creation."
 } else {
     Write-Host "Creating Virtual Network $VNET_NAME in $RESOURCE_GROUP..."
@@ -224,7 +224,7 @@ if (az network vnet exists --name $VNET_NAME --resource-group $RESOURCE_GROUP) {
 
 ```pwsh
 # Create Azure Bastion Public IP address
-if (az network public-ip exists --name $BASTION_PIP_NAME --resource-group $RESOURCE_GROUP) {
+if (-not (az network public-ip show --name $BASTION_PIP_NAME --resource-group $RESOURCE_GROUP)) {
     Write-Host "Public IP $BASTION_PIP_NAME already exists in $RESOURCE_GROUP. Skipping creation."
 } else {
     Write-Host "Creating Public IP $BASTION_PIP_NAME in $RESOURCE_GROUP..."
@@ -236,7 +236,7 @@ if (az network public-ip exists --name $BASTION_PIP_NAME --resource-group $RESOU
     --sku Standard
 }
 # Create Azure Bastion Host
-if (az network bastion exists --name $BASTION_NAME --resource-group $RESOURCE_GROUP) {
+if (-not (az network bastion show --name $BASTION_NAME --resource-group $RESOURCE_GROUP)) {
     Write-Host "Bastion Host $BASTION_NAME already exists in $RESOURCE_GROUP. Skipping creation."
 } else {
     Write-Host "Creating Bastion Host $BASTION_NAME in $RESOURCE_GROUP..."
@@ -305,7 +305,7 @@ $privateDnsZones = $globalZones + $regionSpecificZones
 
 foreach ($zone in $privateDnsZones) {
     #Check to see if the Private DNS Zone already exists
-    if (az network private-dns zone exists --name $zone --resource-group $RESOURCE_GROUP) {
+    if (-not (az network private-dns zone show --name $zone --resource-group $RESOURCE_GROUP)) {
         Write-Host "Private DNS Zone $zone already exists in $RESOURCE_GROUP. Skipping creation."
         continue
     } else {
@@ -316,7 +316,7 @@ foreach ($zone in $privateDnsZones) {
             --name $zone
     }
     #check if the VNet link already exists
-    if (az network private-dns link vnet exists --zone-name $zone --resource-group $RESOURCE_GROUP --name "vnet-link") {
+    if (-not (az network private-dns link vnet show --zone-name $zone --resource-group $RESOURCE_GROUP --name "vnet-link")) {
         Write-Host "Private DNS Zone link for $zone already exists in $RESOURCE_GROUP. Skipping creation."
         continue
     }
@@ -381,13 +381,23 @@ az vm create `
     --image "Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest" `
     --admin-username "$BUILD_AGENT_VM_ADMIN_USERNAME" `
     --admin-password "$BUILD_AGENT_VM_ADMIN_PASSWORD" `
+    --authentication-type password `
     --vnet-name $VNET_NAME `
     --subnet $WKLD_SUBNET_NAME `
     --size "Standard_D4s_v3" `
     --public-ip-address '""' `
-    --nsg-rule NONE `
+    --security-type Standard `
     --enable-secure-boot false `
     --enable-vtpm false
+
+# --data-disk-delete-option Delete `
+    # --os-disk-delete-option Delete `
+    # --nic-delete-option Delete
+    # --disk-controller-type NVMe `
+
+    # --enable-secure-boot false `
+    # --enable-vtpm false `
+
 
 # Save VM credentials to Key Vault
 write-host "Storing VM credentials in Key Vault $KV_NAME..."
@@ -501,13 +511,15 @@ if ($imageDefinitionExists) {
         --gallery-image-definition $BUILD_AGENT_MANAGED_IMAGE_NAME `
         --resource-group $RESOURCE_GROUP `
         --os-type Linux `
+        --os-state Generalized `
         --publisher "EmbergerShared" `
         --offer "Ubuntu-Dev" `
         --sku "Ubuntu-Dev-SKU" `
         --hyper-v-generation V2 `
         --description "Ubuntu VM for Azure DevOps agent with Docker, Azure CLI, PowerShell, and .NET SDK pre-installed"
-        --TrustedLaunch false `
-        --security-type Standard
+
+#       --security-type Standard
+#       --TrustedLaunch false
 }
 
 # Generalize (Sysprep) the VM - this makes it suitable for creating an image
@@ -517,9 +529,6 @@ az vm generalize --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME
 
 # Get the VM's OS disk ID
 $VM_OS_DISK_ID=$(az vm show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --query "storageProfile.osDisk.managedDisk.id" -o tsv)
-Write-Host "VM OS Disk ID: $VM_OS_DISK_ID"
-
-# Get the OS disk name
 $VM_OS_DISK_NAME=$(az disk show --ids $VM_OS_DISK_ID --query "name" -o tsv)
 Write-Host "VM OS Disk Name: $VM_OS_DISK_NAME"
 
@@ -547,7 +556,7 @@ Write-Host "Creating image version $BUILD_AGENT_IMAGE_VERSION_NAME in gallery $G
 az sig image-version create `
     --resource-group $RESOURCE_GROUP `
     --gallery-name $GALLERY_NAME `
-    --gallery-image-definition $IMAGE_DEFINITION_NAME `
+    --gallery-image-definition $BUILD_AGENT_MANAGED_IMAGE_NAME `
     --gallery-image-version $BUILD_AGENT_IMAGE_VERSION_NAME `
     --managed-image $MANAGED_IMAGE_ID `
     --target-regions $LOCATION `
@@ -563,30 +572,30 @@ Write-Host "Cleaning up temporary resources..."
 az vm delete --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --yes
 
 # Delete the associated managed disk (OS disk) if not automatically deleted
-$osDiskName = az vm show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --query "storageProfile.osDisk.name" -o tsv
-if ($osDiskName) {
-    Write-Host "Deleting OS disk: $osDiskName"
-    az disk delete --resource-group $RESOURCE_GROUP --name $osDiskName --yes
-}
+# $osDiskName = az vm show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --query "storageProfile.osDisk.name" -o tsv
+# if ($osDiskName) {
+#     Write-Host "Deleting OS disk: $osDiskName"
+#     az disk delete --resource-group $RESOURCE_GROUP --name $osDiskName --yes
+# }
 
-# Delete any data disks if they exist
-$dataDiskIds = az vm show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --query "storageProfile.dataDisks[].managedDisk.id" -o tsv
-foreach ($diskId in $dataDiskIds) {
-    if ($diskId) {
-        $diskName = $diskId.Split('/')[-1]
-        Write-Host "Deleting data disk: $diskName"
-        az disk delete --ids $diskId --yes
-    }
-}
+# # Delete any data disks if they exist
+# $dataDiskIds = az vm show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --query "storageProfile.dataDisks[].managedDisk.id" -o tsv
+# foreach ($diskId in $dataDiskIds) {
+#     if ($diskId) {
+#         $diskName = $diskId.Split('/')[-1]
+#         Write-Host "Deleting data disk: $diskName"
+#         az disk delete --ids $diskId --yes
+#     }
+# }
 
-# Delete the associated NIC
-$nicIds = az vm show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --query "networkProfile.networkInterfaces[].id" -o tsv
-foreach ($nicId in $nicIds) {
-    if ($nicId) {
-        Write-Host "Deleting network interface: $nicId"
-        az network nic delete --ids $nicId
-    }
-}
+# # Delete the associated NIC
+# $nicIds = az vm show --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_VM_NAME --query "networkProfile.networkInterfaces[].id" -o tsv
+# foreach ($nicId in $nicIds) {
+#     if ($nicId) {
+#         Write-Host "Deleting network interface: $nicId"
+#         az network nic delete --ids $nicId
+#     }
+# }
 
 # Optionally delete the managed image after it's been added to the gallery
 az image delete --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_MANAGED_IMAGE_NAME
@@ -596,22 +605,34 @@ az image delete --resource-group $RESOURCE_GROUP --name $BUILD_AGENT_MANAGED_IMA
 ### Create a VMSS to host the Azure DevOps agent
 
 ```pwsh
+$BUILD_IMAGE_VERSION_ID = $(az sig image-version show `
+    --resource-group $RESOURCE_GROUP `
+    --gallery-name $GALLERY_NAME `
+    --gallery-image-definition $BUILD_AGENT_MANAGED_IMAGE_NAME `
+    --gallery-image-version $BUILD_AGENT_IMAGE_VERSION_NAME `
+    --query "id" -o tsv)
+
+$WKLD_SUBNET_ID = $(az network vnet subnet show --resource-group $RESOURCE_GROUP --vnet-name $VNET_NAME --name $WKLD_SUBNET_NAME --query id -o tsv)
+
 # Create the VMSS with the managed image from the Shared Image Gallery
 az vmss create `
     --resource-group $RESOURCE_GROUP `
     --name $VMSS_NAME `
-    --image "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Compute/galleries/$GALLERY_NAME/images/$IMAGE_DEFINITION_NAME/versions/$BUILD_IMAGE_VERSION_NAME" `
+    --image $BUILD_IMAGE_VERSION_ID `
+    --vm-sku Standard_D8s_v6 `
     --admin-username $VMSS_ADMIN_USERNAME `
-    --admin-password $VMSS_ADMIN_PASSWORD `
-    --vnet-name $VNET_NAME `
-    --subnet $WKLD_SUBNET_NAME `
-    --instance-count 1 `
-    --upgrade-policy-mode Automatic `
-    --nsg-rule NONE `
-    --public-ip-address '""' `
-    --load-balancer '' `
-    --custom-data "echo 'This is a VMSS for Azure DevOps agents'" `
-    --no-wait
+    --admin-password "$VMSS_ADMIN_PASSWORD" `
+    --authentication-type password `
+    --disable-overprovision `
+    --upgrade-policy-mode manual `
+    --single-placement-group false `
+    --platform-fault-domain-count 1 `
+    --load-balancer '""' `
+    --orchestration-mode Uniform `
+    --security-type Standard `
+    --subnet $WKLD_SUBNET_ID
+
+
 Write-Host "VMSS $VMSS_NAME created in $RESOURCE_GROUP with username $VMSS_ADMIN_USERNAME."
 
 # Store the VMSS admin credentials in Key Vault
